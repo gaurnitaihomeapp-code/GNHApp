@@ -1,23 +1,33 @@
-import { Devotee, PrasadamCount, Expense, ExpenseStatus, MonthlyLedger } from '../types';
+import { Devotee, PrasadamCount, Expense, ExpenseStatus, ExpenseType, MonthlyLedger } from '../types';
 import { INITIAL_DEVOTEES } from '../data/seedDevotees';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, isLocalDataMode, getDataEnvironmentInfo } from './supabase';
 import { calculateDevoteeMaxCounts, getAllDatesInMonth } from '../utils/calculations';
 import { normalizeFamilyMembers } from '../utils/devoteeHelpers';
 import { fileToBase64 } from '../utils/imageCompressor';
 
-// Storage keys
-const STORAGE_KEYS = {
-  DEVOTEES: 'gnh_devotees',
-  PRASADAM_COUNTS: 'gnh_prasadam_counts',
-  EXPENSES: 'gnh_expenses',
-  MONTHLY_LEDGERS: 'gnh_monthly_ledgers',
-  SYSTEM_CONFIG: 'gnh_system_config',
-  ACTIVE_DEVOTEE_PHONE: 'gnh_active_phone',
-  ACTIVE_GUEST_NAME: 'gnh_active_guest',
-  ADMIN_AUTH: 'gnh_admin_auth',
-  ACTIVE_MONTH: 'gnh_active_month',
-  SCHEMA_VERSION: 'gnh_schema_version',
+// Storage keys namespace mapper (Local mode uses 'gnh_local_' to ensure zero leakage with Production)
+const BASE_STORAGE_KEYS = {
+  DEVOTEES: 'devotees',
+  PRASADAM_COUNTS: 'prasadam_counts',
+  EXPENSES: 'expenses',
+  MONTHLY_LEDGERS: 'monthly_ledgers',
+  SYSTEM_CONFIG: 'system_config',
+  ACTIVE_DEVOTEE_PHONE: 'active_phone',
+  ACTIVE_GUEST_NAME: 'active_guest',
+  ADMIN_AUTH: 'admin_auth',
+  ACTIVE_MONTH: 'active_month',
+  SCHEMA_VERSION: 'schema_version',
 };
+
+const STORAGE_KEYS: Record<keyof typeof BASE_STORAGE_KEYS, string> = new Proxy(BASE_STORAGE_KEYS, {
+  get(target, prop: string) {
+    if (prop in target) {
+      const prefix = isLocalDataMode() ? 'gnh_local_' : 'gnh_';
+      return `${prefix}${target[prop as keyof typeof BASE_STORAGE_KEYS]}`;
+    }
+    return undefined;
+  },
+}) as Record<keyof typeof BASE_STORAGE_KEYS, string>;
 
 const CURRENT_SCHEMA_VERSION = '2026_08_clean_v2';
 
@@ -462,20 +472,32 @@ class StorageService {
       try {
         let query = supabase.from('expenses').select('*').order('created_at', { ascending: false });
         if (cycleMonth) {
-          query = query.or(`cycle_month.eq.${cycleMonth},type.eq.JANMASHTAMI`);
+          query = query.or(`cycle_month.eq.${cycleMonth},type.eq.JANMASHTAMI,type.eq.PRABHUPADA_APPEARANCE`);
         }
         const { data, error } = await query;
         if (!error && data) {
           const mapped: Expense[] = data.map((d: any) => {
             let status: ExpenseStatus = d.status || 'PENDING';
             let rejection_reason = d.rejection_reason || null;
+            let type: ExpenseType = d.type || 'REGULAR';
+            let comments: string | null = d.comments || null;
+
             if (d.rejection_reason === '__PENDING__' || d.rejection_reason === 'PENDING_APPROVAL') {
               status = 'PENDING';
               rejection_reason = null;
             }
+
+            // Restore PRABHUPADA_APPEARANCE if saved with fallback comment tag
+            if (comments && comments.includes('[PRABHUPADA_APPEARANCE]')) {
+              type = 'PRABHUPADA_APPEARANCE';
+              comments = comments.replace('[PRABHUPADA_APPEARANCE]', '').trim() || null;
+            }
+
             return {
               ...d,
+              type,
               status,
+              comments,
               rejection_reason,
               date: d.date || (d.created_at ? d.created_at.slice(0, 10) : undefined),
             };
@@ -493,20 +515,31 @@ class StorageService {
     const normalized: Expense[] = expenses.map(e => {
       let status: ExpenseStatus = e.status || 'PENDING';
       let rejection_reason = e.rejection_reason || null;
+      let type: ExpenseType = e.type || 'REGULAR';
+      let comments: string | null = e.comments || null;
+
       if (e.rejection_reason === '__PENDING__' || e.rejection_reason === 'PENDING_APPROVAL') {
         status = 'PENDING';
         rejection_reason = null;
       }
+
+      if (comments && comments.includes('[PRABHUPADA_APPEARANCE]')) {
+        type = 'PRABHUPADA_APPEARANCE';
+        comments = comments.replace('[PRABHUPADA_APPEARANCE]', '').trim() || null;
+      }
+
       return {
         ...e,
+        type,
         status,
+        comments,
         rejection_reason,
         date: e.date || (e.created_at ? e.created_at.slice(0, 10) : undefined),
       };
     });
     if (cycleMonth) {
       return normalized.filter(
-        e => e.cycle_month === cycleMonth || (e.date && e.date.startsWith(cycleMonth)) || e.type === 'JANMASHTAMI'
+        e => e.cycle_month === cycleMonth || (e.date && e.date.startsWith(cycleMonth)) || e.type === 'JANMASHTAMI' || e.type === 'PRABHUPADA_APPEARANCE'
       );
     }
     return normalized;
@@ -534,20 +567,30 @@ class StorageService {
         const { error } = await supabase.from('expenses').upsert(newExpense, { onConflict: 'id' });
         if (error) {
           console.warn('Supabase saveExpense error, trying fallback:', error);
+          
+          let candidateToSave: any = { ...newExpense };
+
+          // If remote enum doesn't support 'PRABHUPADA_APPEARANCE' yet, fallback to saving with 'JANMASHTAMI' and a tag
+          if (newExpense.type === 'PRABHUPADA_APPEARANCE' && (error.code === '22P02' || error.message?.includes('PRABHUPADA_APPEARANCE') || error.message?.includes('expense_type'))) {
+            candidateToSave = {
+              ...candidateToSave,
+              type: 'JANMASHTAMI',
+              comments: `[PRABHUPADA_APPEARANCE] ${newExpense.comments || ''}`.trim(),
+            };
+          }
+
           // If remote enum doesn't support 'PENDING' yet, fallback to saving with status 'APPROVED' and rejection_reason '__PENDING__'
           if (error.message?.includes('PENDING') || error.code === '22P02') {
-            const fallbackExpense = {
-              ...newExpense,
+            candidateToSave = {
+              ...candidateToSave,
               status: 'APPROVED',
               rejection_reason: '__PENDING__',
             };
-            const { error: err2 } = await supabase.from('expenses').upsert(fallbackExpense, { onConflict: 'id' });
-            if (err2 && (err2.message?.includes('date') || err2.code === '42703')) {
-              const { date, ...withoutDate } = fallbackExpense;
-              await supabase.from('expenses').upsert(withoutDate, { onConflict: 'id' });
-            }
-          } else if (error.message?.includes('date') || error.details?.includes('date') || error.code === '42703') {
-            const { date, ...withoutDate } = newExpense;
+          }
+
+          const { error: err2 } = await supabase.from('expenses').upsert(candidateToSave, { onConflict: 'id' });
+          if (err2 && (err2.message?.includes('date') || err2.code === '42703')) {
+            const { date, ...withoutDate } = candidateToSave;
             await supabase.from('expenses').upsert(withoutDate, { onConflict: 'id' });
           }
         }
@@ -938,12 +981,17 @@ class StorageService {
     }
   }
 
+  getDataEnvironment() {
+    return getDataEnvironmentInfo();
+  }
+
   resetDatabaseToDefaults(): void {
     localStorage.removeItem(STORAGE_KEYS.DEVOTEES);
     localStorage.removeItem(STORAGE_KEYS.PRASADAM_COUNTS);
     localStorage.removeItem(STORAGE_KEYS.EXPENSES);
     localStorage.removeItem(STORAGE_KEYS.MONTHLY_LEDGERS);
     localStorage.removeItem(STORAGE_KEYS.SYSTEM_CONFIG);
+    localStorage.removeItem(STORAGE_KEYS.SCHEMA_VERSION);
     this.initialized = false;
     this.init();
     this.notifySubscribers();

@@ -2,7 +2,7 @@ import React from 'react';
 import {
   FileSpreadsheet,
   UtensilsCrossed,
-  Sparkles,
+  Crown,
   ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -34,10 +34,10 @@ export const TabBar: React.FC = () => {
       icon: UtensilsCrossed,
     },
     {
-      id: 'janmashtami',
-      label: 'Janmashtami Expenses',
-      shortLabel: 'Janmashtami',
-      icon: Sparkles,
+      id: 'appearance_day',
+      label: 'Prabhupada Appearance Day',
+      shortLabel: 'Appearance Day',
+      icon: Crown,
     },
     ...(isAdmin
       ? [
@@ -55,6 +55,12 @@ export const TabBar: React.FC = () => {
     setActiveTab(tabId);
   };
 
+  const isTabActive = (tabId: ActiveTab) => {
+    if (activeTab === tabId) return true;
+    if (tabId === 'appearance_day' && activeTab === 'janmashtami') return true;
+    return false;
+  };
+
   const gridColsClass = isAdmin ? 'grid-cols-4' : 'grid-cols-3';
 
   return (
@@ -65,7 +71,7 @@ export const TabBar: React.FC = () => {
           <nav className="flex space-x-1 sm:space-x-4">
             {allTabs.map(tab => {
               const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
+              const isActive = isTabActive(tab.id);
 
               return (
                 <button
@@ -95,7 +101,7 @@ export const TabBar: React.FC = () => {
         <div className={cn('grid h-16 items-center px-1', gridColsClass)}>
           {allTabs.map(tab => {
             const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+            const isActive = isTabActive(tab.id);
 
             return (
               <button

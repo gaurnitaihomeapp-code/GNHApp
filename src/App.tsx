@@ -4,7 +4,7 @@ import { Navbar } from './components/layout/Navbar';
 import { TabBar } from './components/layout/TabBar';
 import { ReportsPage } from './pages/ReportsPage';
 import { PrasadamPage } from './pages/PrasadamPage';
-import { JanmashtamiPage } from './pages/JanmashtamiPage';
+import { AppearanceDayPage } from './pages/AppearanceDayPage';
 import { AdminPage } from './pages/AdminPage';
 import { LoginPage } from './pages/LoginPage';
 import { LoginModal } from './components/auth/LoginModal';
@@ -51,7 +51,7 @@ export const App: React.FC = () => {
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 md:p-8">
         {activeTab === 'reports' && <ReportsPage />}
         {activeTab === 'prasadam' && <PrasadamPage />}
-        {activeTab === 'janmashtami' && <JanmashtamiPage />}
+        {(activeTab === 'appearance_day' || activeTab === 'janmashtami') && <AppearanceDayPage />}
         {activeTab === 'admin' && <AdminPage />}
       </main>
 

@@ -9,6 +9,7 @@ import {
   ActiveTab,
 } from '../types';
 import { storageService } from '../services/storageService';
+import { getDataEnvironmentInfo } from '../services/supabase';
 import {
   getCurrentCycleMonth,
   computeDevoteeMonthlySummaryWithCarryForward,
@@ -56,6 +57,10 @@ interface AppContextType {
   readNotificationIds: string[];
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
+
+  // Environment & Storage Mode
+  isLocalMode: boolean;
+  dataEnvironment: ReturnType<typeof getDataEnvironmentInfo>;
 
   // Summaries
   communityCostPerMember: number;
@@ -107,6 +112,10 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Environment & Data Mode
+  const dataEnvironment = useMemo(() => storageService.getDataEnvironment(), []);
+  const isLocalMode = dataEnvironment.isLocal;
+
   // Theme state
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const savedTheme = localStorage.getItem('gnh_theme') as 'light' | 'dark' | null;
@@ -736,6 +745,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteDevotee,
         refreshData,
         resetDatabase,
+        isLocalMode,
+        dataEnvironment,
       }}
     >
       {children}

@@ -39,6 +39,7 @@ export const Navbar: React.FC = () => {
     activeTab,
     setIsNotificationModalOpen,
     unreadNotificationCount,
+    isLocalMode,
   } = useApp();
 
   const [countdown, setCountdown] = useState(() => getCutoffCountdown(activeMonth));
@@ -109,6 +110,15 @@ export const Navbar: React.FC = () => {
                   <Badge variant="saffron" size="sm" className="text-[10px] px-1.5 py-0">
                     Prasadam
                   </Badge>
+                  {isLocalMode && (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 tracking-tight"
+                      title="Operating in isolated Local Data mode. All changes stay in your browser and will never affect live production data."
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Local Data
+                    </span>
+                  )}
                 </div>
                 <p className="text-[10px] font-medium text-slate-400">
                   Prasadam & Expense App
