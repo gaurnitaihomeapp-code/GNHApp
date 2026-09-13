@@ -25,12 +25,15 @@ CREATE TABLE IF NOT EXISTS prasadam_counts (
     UNIQUE(devotee_id, date)
 );
 
--- 3. Expenses (Regular & Janmashtami)
+-- 3. Expenses (Regular, Janmashtami & Prabhupada Appearance Day)
 DO $$ BEGIN
-    CREATE TYPE expense_type AS ENUM ('REGULAR', 'JANMASHTAMI');
+    CREATE TYPE expense_type AS ENUM ('REGULAR', 'JANMASHTAMI', 'PRABHUPADA_APPEARANCE');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
+
+-- In case expense_type enum was already created earlier in Supabase, add PRABHUPADA_APPEARANCE:
+ALTER TYPE expense_type ADD VALUE IF NOT EXISTS 'PRABHUPADA_APPEARANCE';
 
 DO $$ BEGIN
     CREATE TYPE expense_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED');

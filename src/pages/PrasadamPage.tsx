@@ -4,7 +4,6 @@ import {
   Plus,
   Minus,
   Lock,
-  Upload,
   Receipt,
   Eye,
   Users,
@@ -12,12 +11,19 @@ import {
   Save,
   Bell,
   AlertCircle,
+  Download,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
-import { Modal } from '../components/common/Modal';
+import { MultiAttachmentUpload } from '../components/common/MultiAttachmentUpload';
+import { ReceiptViewerModal } from '../components/common/ReceiptViewerModal';
+import { SortableHeader } from '../components/common/SortableHeader';
+import { useTableSort } from '../hooks/useTableSort';
+import { exportTableToExcel } from '../utils/exportHelpers';
+import { parseReceiptUrls, formatReceiptUrls } from '../utils/receiptHelpers';
+import { compressImage } from '../utils/imageCompressor';
 import { Expense, PrasadamCount } from '../types';
 import {
   formatRupee,
@@ -36,10 +42,7 @@ import {
   getPureFamilyMembers,
   getFriendMembers,
 } from '../utils/devoteeHelpers';
-import { compressImage } from '../utils/imageCompressor';
 import { storageService } from '../services/storageService';
-
-const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB limit
 
 export const PrasadamPage: React.FC = () => {
   const {
@@ -258,8 +261,7 @@ export const PrasadamPage: React.FC = () => {
   const [expenseTitle, setExpenseTitle] = useState<string>('');
   const [expenseAmount, setExpenseAmount] = useState<string>('');
   const [expenseComments, setExpenseComments] = useState<string>('');
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [isUploadingExpense, setIsUploadingExpense] = useState(false);
   const [viewingReceiptUrl, setViewingReceiptUrl] = useState<string | null>(null);
 
@@ -271,50 +273,6 @@ export const PrasadamPage: React.FC = () => {
   useEffect(() => {
     setExpenseDate(getDefaultExpenseDate(activeMonth));
   }, [activeMonth]);
-
-  // Cleanup object URL on unmount
-  useEffect(() => {
-    return () => {
-      if (receiptPreview) {
-        URL.revokeObjectURL(receiptPreview);
-      }
-    };
-  }, [receiptPreview]);
-
-  // Handle Receipt photo selection
-  const handleReceiptChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
-      showToast({
-        type: 'error',
-        title: 'File Too Large',
-        message: 'Attachment size exceeds the 10 MB limit. Please select a smaller file.',
-      });
-      e.target.value = '';
-      return;
-    }
-
-    if (receiptPreview) {
-      URL.revokeObjectURL(receiptPreview);
-    }
-
-    try {
-      showToast({
-        type: 'info',
-        title: 'Optimizing Photo',
-        message: 'Compressing receipt photo for fast upload...',
-      });
-      const compressed = await compressImage(file, { maxSizeMB: 0.19 });
-      setReceiptFile(compressed);
-      setReceiptPreview(URL.createObjectURL(compressed));
-    } catch (err) {
-      console.error('Compression error', err);
-      setReceiptFile(file);
-      setReceiptPreview(URL.createObjectURL(file));
-    }
-  };
 
   // Handle Expense Form Submit
   const handleExpenseSubmit = async (e: React.FormEvent) => {
@@ -337,8 +295,22 @@ export const PrasadamPage: React.FC = () => {
     setIsUploadingExpense(true);
     try {
       let billUrl: string | null = null;
-      if (receiptFile) {
-        billUrl = await storageService.uploadReceipt(receiptFile);
+
+      if (receiptFiles.length > 0) {
+        const uploadedUrls: string[] = [];
+        for (const file of receiptFiles) {
+          let toUpload = file;
+          if (file.type.startsWith('image/')) {
+            try {
+              toUpload = await compressImage(file, { maxSizeMB: 0.19 });
+            } catch (err) {
+              console.warn('Compression error, using original', err);
+            }
+          }
+          const url = await storageService.uploadReceipt(toUpload);
+          uploadedUrls.push(url);
+        }
+        billUrl = formatReceiptUrls(uploadedUrls);
       }
 
       await submitExpense({
@@ -355,15 +327,11 @@ export const PrasadamPage: React.FC = () => {
         cycle_month: expenseDate ? expenseDate.slice(0, 7) : activeMonth,
       });
 
-      // Reset form & revoke preview URL
+      // Reset form
       setExpenseTitle('');
       setExpenseAmount('');
       setExpenseComments('');
-      setReceiptFile(null);
-      if (receiptPreview) {
-        URL.revokeObjectURL(receiptPreview);
-      }
-      setReceiptPreview(null);
+      setReceiptFiles([]);
       setExpenseDate(getDefaultExpenseDate(activeMonth));
       setPayerName(getDefaultPayer());
     } finally {
@@ -378,6 +346,58 @@ export const PrasadamPage: React.FC = () => {
       (e.cycle_month === activeMonth || (e.date && e.date.startsWith(activeMonth))) &&
       e.type === 'REGULAR'
   );
+
+  const {
+    sortedData: sortedRegularExpenses,
+    sortConfig: expenseSortConfig,
+    requestSort: requestExpenseSort,
+  } = useTableSort<Expense>(regularExpenses, {
+    initialConfig: { key: 'date', direction: 'desc' },
+    getSortValue: (item, key) => {
+      if (key === 'date') return item.date || item.created_at;
+      if (key === 'created_at') return item.created_at;
+      if (key === 'title') return item.title;
+      if (key === 'payer_name') return item.payer_name;
+      if (key === 'amount') return Number(item.amount);
+      if (key === 'status') return item.status;
+      return (item as any)[key];
+    },
+  });
+
+  const handleExportExpenses = () => {
+    if (sortedRegularExpenses.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Expenses to Export',
+        message: 'There are no submitted expenses to export for this month.',
+      });
+      return;
+    }
+
+    const exportData = sortedRegularExpenses.map(exp => ({
+      'Expense Date': formatExpenseDate(exp.date || exp.created_at),
+      'Submitted At': formatSubmissionDateTime(exp.created_at),
+      'Item Title': exp.title,
+      'Comments / Notes': exp.comments || '-',
+      'Payer': exp.payer_name,
+      'Amount (₹)': Number(exp.amount),
+      'Receipt Attached': exp.bill_url ? 'YES' : 'NO',
+      'Status': exp.status,
+      'Rejection Reason': exp.rejection_reason || '-',
+    }));
+
+    exportTableToExcel(
+      exportData,
+      `My_Regular_Expenses_${activeMonth}_${formatMonthName(activeMonth).replace(/\s+/g, '_')}`,
+      'Regular Expenses'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Export Successful',
+      message: 'Expenses table exported in current sorted order.',
+    });
+  };
 
   // If not logged in
   if (!activeDevotee && !guestName) {
@@ -853,31 +873,16 @@ export const PrasadamPage: React.FC = () => {
               />
             </div>
 
-            {/* Bill Upload with 10 MB Limit */}
+            {/* Bill Upload - Up to 5 Attachments */}
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                Bill / Receipt Photo (Max 10 MB, Auto-compressed)
-              </label>
-              <div className="flex items-center gap-3">
-                <label className="flex-1 flex flex-col items-center justify-center p-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:border-amber-500 dark:hover:border-amber-500 transition-colors bg-slate-50 dark:bg-slate-800/50">
-                  <Upload className="w-5 h-5 text-slate-400 mb-1" />
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    {receiptFile ? receiptFile.name : 'Choose receipt photo'}
-                  </span>
-                  <span className="text-[10px] text-slate-400">JPG, PNG, WebP up to 10 MB</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleReceiptChange}
-                    className="hidden"
-                  />
-                </label>
-                {receiptPreview && (
-                  <div className="relative w-16 h-16 rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700 shrink-0">
-                    <img src={receiptPreview} alt="Receipt" className="w-full h-full object-cover" />
-                  </div>
-                )}
-              </div>
+              <MultiAttachmentUpload
+                files={receiptFiles}
+                onFilesChange={setReceiptFiles}
+                maxFiles={5}
+                label="Bill / Receipt Attachments (Optional, up to 5)"
+                sublabel="Attach up to 5 photos/PDFs"
+                onError={(msg) => showToast({ type: 'warning', title: 'Attachment Notice', message: msg })}
+              />
             </div>
           </div>
 
@@ -897,16 +902,31 @@ export const PrasadamPage: React.FC = () => {
 
       {/* 3. SUBMITTED REGULAR EXPENSES LIST */}
       <Card className="p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">
-              Submitted Expenses ({regularExpenses.length})
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Submitted Expenses ({regularExpenses.length})
+              </h3>
+              {regularExpenses.length > 0 && (
+                <Button
+                  type="button"
+                  onClick={handleExportExpenses}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 py-1 px-2.5 h-auto"
+                  title="Export currently sorted expenses to Excel"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                  <span>Export Excel</span>
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Kitchen and grocery purchases offsetting your monthly prasadam bill.
             </p>
           </div>
-          <div className="text-right">
+          <div className="text-left sm:text-right">
             <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold block">
               Total Offset: {formatRupee(
                 regularExpenses
@@ -927,18 +947,66 @@ export const PrasadamPage: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-400 uppercase font-semibold">
-                  <th className="py-2.5 px-3">Expense Date</th>
-                  <th className="py-2.5 px-3">Submitted At</th>
-                  <th className="py-2.5 px-3">Item Title</th>
-                  <th className="py-2.5 px-3">Payer</th>
-                  <th className="py-2.5 px-3 text-right">Amount</th>
-                  <th className="py-2.5 px-3 text-center">Receipt</th>
-                  <th className="py-2.5 px-3 text-center">Status</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 uppercase font-semibold text-[11px]">
+                  <SortableHeader
+                    label="Expense Date"
+                    sortKey="date"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Submitted At"
+                    sortKey="created_at"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Item Title"
+                    sortKey="title"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Payer"
+                    sortKey="payer_name"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Amount"
+                    sortKey="amount"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    align="right"
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Receipt"
+                    align="center"
+                    className="py-2.5 px-3"
+                  />
+                  <SortableHeader
+                    label="Status"
+                    sortKey="status"
+                    currentSortKey={expenseSortConfig?.key}
+                    currentDirection={expenseSortConfig?.direction}
+                    onSort={requestExpenseSort}
+                    align="center"
+                    className="py-2.5 px-3"
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                {regularExpenses.map((exp: Expense) => (
+                {sortedRegularExpenses.map((exp: Expense) => (
                   <tr key={exp.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="py-3 px-3 text-slate-700 dark:text-slate-300 font-mono font-medium">
                       {formatExpenseDate(exp.date || exp.created_at)}
@@ -969,10 +1037,10 @@ export const PrasadamPage: React.FC = () => {
                       {exp.bill_url ? (
                         <button
                           onClick={() => setViewingReceiptUrl(exp.bill_url!)}
-                          className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 hover:underline text-xs"
+                          className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 hover:underline text-xs font-semibold"
                         >
                           <Eye className="w-3.5 h-3.5" />
-                          <span>View</span>
+                          <span>View ({parseReceiptUrls(exp.bill_url).length})</span>
                         </button>
                       ) : (
                         <span className="text-slate-400">-</span>
@@ -1010,23 +1078,13 @@ export const PrasadamPage: React.FC = () => {
         )}
       </Card>
 
-      {/* Receipt Viewer Modal */}
-      <Modal
+      {/* Multi-Receipt Viewer Modal */}
+      <ReceiptViewerModal
         isOpen={Boolean(viewingReceiptUrl)}
         onClose={() => setViewingReceiptUrl(null)}
-        title="Expense Receipt"
-        maxWidth="lg"
-      >
-        {viewingReceiptUrl && (
-          <div className="flex justify-center p-2">
-            <img
-              src={viewingReceiptUrl}
-              alt="Receipt Full View"
-              className="max-h-[70vh] rounded-xl object-contain shadow-md"
-            />
-          </div>
-        )}
-      </Modal>
+        billUrl={viewingReceiptUrl}
+        title="Regular Expense Receipts"
+      />
     </div>
   );
 };

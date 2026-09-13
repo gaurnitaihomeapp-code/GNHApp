@@ -1,6 +1,6 @@
 export type MealType = 'breakfast' | 'lunch' | 'dinner';
 
-export type ExpenseType = 'REGULAR' | 'JANMASHTAMI';
+export type ExpenseType = 'REGULAR' | 'JANMASHTAMI' | 'PRABHUPADA_APPEARANCE';
 export type ExpenseStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type SettlementState = 'UNSETTLED' | 'PENDING_VERIFICATION' | 'SETTLED';
 
@@ -104,6 +104,7 @@ export interface DevoteeMonthlySummary {
   unfilled_days: number;
   is_locked: boolean;
   janmashtami_expenses: number;
+  prabhupada_expenses: number;
   // Separate Breakdown for Family vs Friends
   family_meals_cost?: number;
   family_community_cost?: number;
@@ -112,4 +113,4 @@ export interface DevoteeMonthlySummary {
   friends_total_cost?: number;
 }
 
-export type ActiveTab = 'reports' | 'prasadam' | 'janmashtami' | 'admin';
+export type ActiveTab = 'reports' | 'prasadam' | 'appearance_day' | 'janmashtami' | 'admin';

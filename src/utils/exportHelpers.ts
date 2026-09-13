@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { DevoteeMonthlySummary, PrasadamCount, Expense } from '../types';
 import { formatRupee, formatMonthName } from './calculations';
 import { formatDevoteeFamilyDisplay } from './devoteeHelpers';
+import { parseReceiptUrls } from './receiptHelpers';
 
 /**
  * Export full monthly data to a multi-sheet Excel workbook
@@ -39,7 +40,8 @@ export function exportToExcel(
     'Final Balance (₹)': s.final_balance,
     'Balance Status': s.final_balance > 0 ? 'Owes GNH' : s.final_balance < 0 ? 'GNH Owes' : 'Settled',
     'Settlement Status': s.settlement_status,
-    'Janmashtami Expenses (₹)': s.janmashtami_expenses,
+    'Prabhupada Appearance Day Expenses (₹)': s.prabhupada_expenses || 0,
+    'Janmashtami Expenses (₹)': s.janmashtami_expenses || 0,
   }));
 
   const wsSummary = XLSX.utils.json_to_sheet(summaryData);
@@ -66,44 +68,72 @@ export function exportToExcel(
 
   // Sheet 3: Regular Monthly Expenses (filtered strictly by Date of Expense)
   const regularExpenseData = allExpenses
-    .filter(e => e.type !== 'JANMASHTAMI')
+    .filter(e => e.type === 'REGULAR')
     .filter(e => {
       const expDate = e.date || (e.created_at ? e.created_at.slice(0, 10) : '');
       return expDate.startsWith(cycleMonth);
     })
-    .map(e => ({
-      'Expense Date': e.date || (e.created_at ? e.created_at.slice(0, 10) : cycleMonth),
-      'Submitted At': e.created_at || '-',
-      'Cycle Month': e.cycle_month,
-      'Type': e.type,
-      'Group / Guest': e.devotee_id ? countsMap.get(e.devotee_id) : `Guest: ${e.guest_name || 'Anonymous'}`,
-      'Payer Name': e.payer_name,
-      'Title / Item': e.title,
-      'Amount (₹)': e.amount,
-      'Status': e.status,
-      'Rejection Reason': e.rejection_reason || '-',
-      'Comments': e.comments || '',
-      'Bill Attached': e.bill_url ? 'YES' : 'NO'
-    }));
+    .map(e => {
+      const receiptCount = parseReceiptUrls(e.bill_url).length;
+      return {
+        'Expense Date': e.date || (e.created_at ? e.created_at.slice(0, 10) : cycleMonth),
+        'Submitted At': e.created_at || '-',
+        'Cycle Month': e.cycle_month,
+        'Type': e.type,
+        'Group / Guest': e.devotee_id ? countsMap.get(e.devotee_id) : `Guest: ${e.guest_name || 'Anonymous'}`,
+        'Payer Name': e.payer_name,
+        'Title / Item': e.title,
+        'Amount (₹)': e.amount,
+        'Status': e.status,
+        'Rejection Reason': e.rejection_reason || '-',
+        'Comments': e.comments || '',
+        'Bill Attached': receiptCount > 1 ? `YES (${receiptCount} files)` : receiptCount === 1 ? 'YES' : 'NO'
+      };
+    });
 
   const wsExpenses = XLSX.utils.json_to_sheet(regularExpenseData);
   XLSX.utils.book_append_sheet(wb, wsExpenses, 'Monthly Expenses');
 
-  // Sheet 4: Janmashtami Ledger (All Time)
+  // Sheet 4: Prabhupada Appearance Day Ledger (All Time)
+  const prabhupadaData = allExpenses
+    .filter(e => e.type === 'PRABHUPADA_APPEARANCE')
+    .map(e => {
+      const receiptCount = parseReceiptUrls(e.bill_url).length;
+      return {
+        'Expense Date': e.date || (e.created_at ? e.created_at.slice(0, 10) : '-'),
+        'Submitted At': e.created_at || '-',
+        'Devotee / Guest': e.devotee_id ? countsMap.get(e.devotee_id) : `Guest: ${e.guest_name || 'Anonymous'}`,
+        'Payer Name': e.payer_name,
+        'Title / Item': e.title,
+        'Amount (₹)': e.amount,
+        'Status': e.status,
+        'Rejection Reason': e.rejection_reason || '-',
+        'Comments': e.comments || '',
+        'Bill Attached': receiptCount > 1 ? `YES (${receiptCount} files)` : receiptCount === 1 ? 'YES' : 'NO'
+      };
+    });
+
+  const wsPrabhupada = XLSX.utils.json_to_sheet(prabhupadaData);
+  XLSX.utils.book_append_sheet(wb, wsPrabhupada, 'Appearance Day (All Time)');
+
+  // Sheet 5: Janmashtami Ledger (All Time)
   const janmashtamiData = allExpenses
     .filter(e => e.type === 'JANMASHTAMI')
-    .map(e => ({
-      'Expense Date': e.date || (e.created_at ? e.created_at.slice(0, 10) : '-'),
-      'Submitted At': e.created_at || '-',
-      'Devotee / Guest': e.devotee_id ? countsMap.get(e.devotee_id) : `Guest: ${e.guest_name || 'Anonymous'}`,
-      'Payer Name': e.payer_name,
-      'Title / Item': e.title,
-      'Amount (₹)': e.amount,
-      'Status': e.status,
-      'Rejection Reason': e.rejection_reason || '-',
-      'Comments': e.comments || '',
-      'Bill Attached': e.bill_url ? 'YES' : 'NO'
-    }));
+    .map(e => {
+      const receiptCount = parseReceiptUrls(e.bill_url).length;
+      return {
+        'Expense Date': e.date || (e.created_at ? e.created_at.slice(0, 10) : '-'),
+        'Submitted At': e.created_at || '-',
+        'Devotee / Guest': e.devotee_id ? countsMap.get(e.devotee_id) : `Guest: ${e.guest_name || 'Anonymous'}`,
+        'Payer Name': e.payer_name,
+        'Title / Item': e.title,
+        'Amount (₹)': e.amount,
+        'Status': e.status,
+        'Rejection Reason': e.rejection_reason || '-',
+        'Comments': e.comments || '',
+        'Bill Attached': receiptCount > 1 ? `YES (${receiptCount} files)` : receiptCount === 1 ? 'YES' : 'NO'
+      };
+    });
 
   const wsJanmashtami = XLSX.utils.json_to_sheet(janmashtamiData);
   XLSX.utils.book_append_sheet(wb, wsJanmashtami, 'Janmashtami (All Time)');
@@ -242,3 +272,36 @@ export function exportToPDF(
   const filename = `GNH_Statement_${cycleMonth}.pdf`;
   doc.save(filename);
 }
+
+/**
+ * Export any tabular dataset to an Excel (.xlsx) file.
+ * Preserves the exact array order passed in (honoring active table sorting and filtering).
+ */
+export function exportTableToExcel<T extends Record<string, any>>(
+  data: T[],
+  filename: string,
+  sheetName: string = 'Sheet1'
+) {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(data);
+
+  // Auto calculate reasonable column widths based on headers and row values
+  if (data.length > 0) {
+    const keys = Object.keys(data[0]);
+    ws['!cols'] = keys.map(key => {
+      let maxLen = key.length;
+      for (let i = 0; i < Math.min(data.length, 100); i++) {
+        const valStr = data[i][key] != null ? String(data[i][key]) : '';
+        if (valStr.length > maxLen) {
+          maxLen = valStr.length;
+        }
+      }
+      return { wch: Math.min(Math.max(maxLen + 3, 10), 50) };
+    });
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const cleanFilename = filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, cleanFilename);
+}
+

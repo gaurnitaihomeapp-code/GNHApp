@@ -479,6 +479,12 @@ export function computeDevoteeMonthlySummary(
   );
   const janmashtami_expenses = devoteeJanmashtamiExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
+  // Filter Prabhupada Appearance Day expenses (treat APPROVED and PENDING as assumed seva)
+  const devoteePrabhupadaExpenses = allExpenses.filter(
+    e => e.devotee_id === devotee.id && e.type === 'PRABHUPADA_APPEARANCE' && (e.status === 'APPROVED' || e.status === 'PENDING')
+  );
+  const prabhupada_expenses = devoteePrabhupadaExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
   const is_locked = isCutoffPassed(cycleMonth, now);
 
   return {
@@ -506,6 +512,7 @@ export function computeDevoteeMonthlySummary(
     unfilled_days,
     is_locked,
     janmashtami_expenses,
+    prabhupada_expenses,
     family_meals_cost,
     family_community_cost,
     family_prasadam_cost,

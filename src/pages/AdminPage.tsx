@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Receipt,
   Sparkles,
+  Crown,
   Check,
   X,
   Calendar,
@@ -53,7 +54,11 @@ import {
   formatDevoteeFamilyDisplay,
   cleanPhoneNumber,
 } from '../utils/devoteeHelpers';
-import { exportToExcel, exportToPDF } from '../utils/exportHelpers';
+import { exportToExcel, exportToPDF, exportTableToExcel } from '../utils/exportHelpers';
+import { SortableHeader } from '../components/common/SortableHeader';
+import { ReceiptViewerModal } from '../components/common/ReceiptViewerModal';
+import { parseReceiptUrls } from '../utils/receiptHelpers';
+import { useTableSort } from '../hooks/useTableSort';
 
 type AdminTab = 'matrix' | 'expenses' | 'regular-expenses' | 'janmashtami-expenses' | 'settlement' | 'whatsapp' | 'devotees' | 'settings';
 
@@ -82,6 +87,7 @@ export const AdminPage: React.FC = () => {
     updateCommunityCostPerMember,
     resetDatabase,
     showToast,
+    isLocalMode,
   } = useApp();
 
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTab>('matrix');
@@ -219,7 +225,19 @@ export const AdminPage: React.FC = () => {
     return monthExpenses.filter(e => e.type === 'REGULAR');
   }, [monthExpenses]);
 
-  // Janmashtami expenses are NOT categorized by month - showing expenses for all time
+  // Festival expenses (Prabhupada Appearance Day & Janmashtami) are NOT categorized by month - showing expenses for all time
+  const [festivalTypeFilter, setFestivalTypeFilter] = useState<'ALL' | 'PRABHUPADA_APPEARANCE' | 'JANMASHTAMI'>('ALL');
+  const [adminViewingReceiptUrl, setAdminViewingReceiptUrl] = useState<string | null>(null);
+
+  const festivalExpenses = useMemo(() => {
+    return expenses.filter(e => {
+      if (festivalTypeFilter === 'ALL') {
+        return e.type === 'PRABHUPADA_APPEARANCE' || e.type === 'JANMASHTAMI';
+      }
+      return e.type === festivalTypeFilter;
+    });
+  }, [expenses, festivalTypeFilter]);
+
   const janmashtamiExpenses = useMemo(() => {
     return expenses.filter(e => e.type === 'JANMASHTAMI');
   }, [expenses]);
@@ -241,7 +259,7 @@ export const AdminPage: React.FC = () => {
   }, [regularExpenses, regularStatusFilter, searchTerm, devotees]);
 
   const filteredJanmashtamiExpenses = useMemo(() => {
-    return janmashtamiExpenses.filter(e => {
+    return festivalExpenses.filter(e => {
       if (janmashtamiStatusFilter !== 'ALL' && e.status !== janmashtamiStatusFilter) return false;
       if (!searchTerm) return true;
       const q = searchTerm.toLowerCase();
@@ -254,7 +272,7 @@ export const AdminPage: React.FC = () => {
         (e.comments && e.comments.toLowerCase().includes(q))
       );
     });
-  }, [janmashtamiExpenses, janmashtamiStatusFilter, searchTerm, devotees]);
+  }, [festivalExpenses, janmashtamiStatusFilter, searchTerm, devotees]);
 
   // Regular Expense Financial Totals for Active Month
   const totalRegularAmount = useMemo(() => {
@@ -515,6 +533,358 @@ export const AdminPage: React.FC = () => {
 
   const datesForMonth = getAllDatesInMonth(activeMonth);
 
+  // 1. MASTER DEVOTEE LEDGER SORT & EXPORT
+  const {
+    sortedData: sortedSummaries,
+    sortConfig: matrixSortConfig,
+    requestSort: requestMatrixSort,
+  } = useTableSort<DevoteeMonthlySummary>(filteredSummaries, {
+    initialConfig: { key: 'group_name', direction: 'asc' },
+    getSortValue: (s, key) => {
+      if (key === 'group_name') return formatDevoteeName(s.devotee);
+      if (key === 'phone_number') return s.devotee.phone_number;
+      if (key === 'total_meals') return s.total_meals;
+      if (key === 'meals_cost') return s.meals_cost;
+      if (key === 'community_cost') return s.community_cost;
+      if (key === 'prasadam_cost') return s.prasadam_cost;
+      if (key === 'approved_expenses') return s.approved_expenses;
+      if (key === 'carried_forward') return s.carried_forward;
+      if (key === 'final_balance') return s.final_balance;
+      if (key === 'settlement_status') return s.settlement_status;
+      return (s as any)[key];
+    },
+  });
+
+  const handleExportMasterLedger = () => {
+    if (sortedSummaries.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Data to Export',
+        message: 'No devotee records match your current search or filter.',
+      });
+      return;
+    }
+
+    const exportData = sortedSummaries.map(s => ({
+      'Devotee Group': formatDevoteeName(s.devotee),
+      'Family Members': formatDevoteeFamilyDisplay(s.devotee, true),
+      'Phone': s.devotee.phone_number,
+      'Total Meals': s.total_meals,
+      'Breakfast (B)': s.breakfast_total,
+      'Lunch (L)': s.lunch_total,
+      'Dinner (D)': s.dinner_total,
+      'Meals Cost (₹)': s.meals_cost,
+      'Community Cost (₹)': s.community_cost,
+      'Total Prasadam Cost (₹)': s.prasadam_cost,
+      'Approved Expenses (₹)': s.approved_expenses,
+      'Pending Expenses (₹)': s.pending_expenses || 0,
+      'Carried Forward (₹)': s.carried_forward,
+      'Payment Recorded (₹)': s.settlement_reported,
+      'Final Balance (₹)': s.final_balance,
+      'Balance Status': s.final_balance > 0 ? 'Owes GNH' : s.final_balance < 0 ? 'GNH Owes' : 'Settled',
+      'Settlement Status': s.settlement_status,
+      'Janmashtami Expenses (₹)': s.janmashtami_expenses,
+    }));
+
+    exportTableToExcel(
+      exportData,
+      `Master_Devotee_Ledger_${activeMonth}_${formatMonthName(activeMonth).replace(/\s+/g, '_')}`,
+      'Master Ledger'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Table Exported',
+      message: 'Master devotee ledger exported in current sorted order.',
+    });
+  };
+
+  // 2. REGULAR EXPENSES SORT & EXPORT
+  const {
+    sortedData: sortedRegularExpenses,
+    sortConfig: regularSortConfig,
+    requestSort: requestRegularSort,
+  } = useTableSort<Expense>(filteredRegularExpenses, {
+    initialConfig: { key: 'date', direction: 'desc' },
+    getSortValue: (exp, key) => {
+      if (key === 'date') return exp.date || exp.created_at;
+      if (key === 'created_at') return exp.created_at;
+      if (key === 'title') return exp.title;
+      if (key === 'payer_name') {
+        const devotee = devotees.find(d => d.id === exp.devotee_id);
+        return `${exp.payer_name} ${devotee ? formatDevoteeName(devotee) : ''}`;
+      }
+      if (key === 'amount') return Number(exp.amount);
+      if (key === 'status') return exp.status;
+      return (exp as any)[key];
+    },
+  });
+
+  const handleExportRegularExpenses = () => {
+    if (sortedRegularExpenses.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Expenses to Export',
+        message: 'No regular expenses match your current filters.',
+      });
+      return;
+    }
+
+    const exportData = sortedRegularExpenses.map(exp => {
+      const devotee = devotees.find(d => d.id === exp.devotee_id);
+      return {
+        'Expense Date': formatExpenseDate(exp.date || exp.created_at),
+        'Submitted At': formatSubmissionDateTime(exp.created_at),
+        'Item / Description': exp.title,
+        'Comments': exp.comments || '-',
+        'Payer Name': exp.payer_name,
+        'Devotee Group / Guest': devotee ? formatDevoteeName(devotee) : (exp.guest_name ? `Guest: ${exp.guest_name}` : 'Unknown'),
+        'Amount (₹)': Number(exp.amount),
+        'Receipt Attached': exp.bill_url ? 'YES' : 'NO',
+        'Status': exp.status,
+        'Rejection Reason': exp.rejection_reason || '-',
+      };
+    });
+
+    exportTableToExcel(
+      exportData,
+      `Regular_Expenses_${activeMonth}_${regularStatusFilter}`,
+      'Regular Expenses'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Table Exported',
+      message: 'Regular expenses exported in current sorted order.',
+    });
+  };
+
+  // 3. JANMASHTAMI EXPENSES SORT & EXPORT
+  const {
+    sortedData: sortedJanmashtamiExpenses,
+    sortConfig: janmashtamiSortConfig,
+    requestSort: requestJanmashtamiSort,
+  } = useTableSort<Expense>(filteredJanmashtamiExpenses, {
+    initialConfig: { key: 'date', direction: 'desc' },
+    getSortValue: (exp, key) => {
+      if (key === 'date') return exp.date || exp.created_at;
+      if (key === 'created_at') return exp.created_at;
+      if (key === 'title') return exp.title;
+      if (key === 'payer_name') {
+        const devotee = devotees.find(d => d.id === exp.devotee_id);
+        return `${exp.payer_name} ${devotee ? formatDevoteeName(devotee) : ''}`;
+      }
+      if (key === 'amount') return Number(exp.amount);
+      if (key === 'status') return exp.status;
+      return (exp as any)[key];
+    },
+  });
+
+  const handleExportJanmashtamiExpenses = () => {
+    if (sortedJanmashtamiExpenses.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Expenses to Export',
+        message: 'No Janmashtami expenses match your current filters.',
+      });
+      return;
+    }
+
+    const exportData = sortedJanmashtamiExpenses.map(exp => {
+      const devotee = devotees.find(d => d.id === exp.devotee_id);
+      return {
+        'Expense Date': formatExpenseDate(exp.date || exp.created_at),
+        'Submitted At': formatSubmissionDateTime(exp.created_at),
+        'Item / Description': exp.title,
+        'Comments': exp.comments || '-',
+        'Payer Name': exp.payer_name,
+        'Devotee Group / Guest': devotee ? formatDevoteeName(devotee) : (exp.guest_name ? `Guest: ${exp.guest_name}` : 'Unknown'),
+        'Amount (₹)': Number(exp.amount),
+        'Receipt Attached': exp.bill_url ? 'YES' : 'NO',
+        'Status': exp.status,
+        'Rejection Reason': exp.rejection_reason || '-',
+      };
+    });
+
+    exportTableToExcel(
+      exportData,
+      `Janmashtami_Expenses_AllTime_${janmashtamiStatusFilter}`,
+      'Janmashtami Expenses'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Table Exported',
+      message: 'Janmashtami festival expenses exported in current sorted order.',
+    });
+  };
+
+  // 4. SETTLEMENT TRACKING SORT & EXPORT
+  const settlementList = useMemo(() => {
+    return filteredSummaries.filter(s => {
+      if (settlementFilter === 'PENDING') return s.settlement_status === 'PENDING_VERIFICATION';
+      if (settlementFilter === 'SETTLED') return s.settlement_status === 'SETTLED';
+      if (settlementFilter === 'UNSETTLED') return s.settlement_status === 'UNSETTLED';
+      return true;
+    });
+  }, [filteredSummaries, settlementFilter]);
+
+  const {
+    sortedData: sortedSettlementList,
+    sortConfig: settlementSortConfig,
+    requestSort: requestSettlementSort,
+  } = useTableSort<DevoteeMonthlySummary>(settlementList, {
+    initialConfig: { key: 'final_balance', direction: 'desc' },
+    getSortValue: (s, key) => {
+      if (key === 'group_name') return formatDevoteeName(s.devotee);
+      if (key === 'phone_number') return s.devotee.phone_number;
+      if (key === 'prasadam_cost') return s.prasadam_cost;
+      if (key === 'approved_expenses') return s.approved_expenses;
+      if (key === 'carried_forward') return s.carried_forward;
+      if (key === 'settlement_reported') return s.settlement_reported;
+      if (key === 'settlement_status') return s.settlement_status;
+      if (key === 'final_balance') return s.final_balance;
+      return (s as any)[key];
+    },
+  });
+
+  const handleExportSettlementTable = () => {
+    if (sortedSettlementList.length === 0) {
+      showToast({
+        type: 'warning',
+        title: 'No Data to Export',
+        message: 'No settlement records match your current filter.',
+      });
+      return;
+    }
+
+    const exportData = sortedSettlementList.map(s => ({
+      'Devotee Group': formatDevoteeName(s.devotee),
+      'Phone': s.devotee.phone_number,
+      'Prasadam Cost (₹)': s.prasadam_cost,
+      'Approved Expenses (₹)': s.approved_expenses,
+      'Carried Forward (₹)': s.carried_forward,
+      'Payment Recorded (₹)': s.settlement_reported,
+      'Payment Date': s.settlement_date_reported || '-',
+      'Payment Notes': (s as any).settlement_notes || '-',
+      'Settlement Status': s.settlement_status,
+      'Final Balance (₹)': s.final_balance,
+      'Status': s.final_balance > 0 ? 'Owes GNH' : s.final_balance < 0 ? 'GNH Owes' : 'Settled',
+    }));
+
+    exportTableToExcel(
+      exportData,
+      `Settlement_Tracking_${activeMonth}_${settlementFilter}`,
+      'Settlements'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Table Exported',
+      message: 'Settlement records exported in current sorted order.',
+    });
+  };
+
+  // 5. DEVOTEE INLINE MATRIX MODAL SORT & EXPORT
+  const devoteeDailyEntries = useMemo(() => {
+    if (!selectedDevoteeForEdit) return [];
+    return datesForMonth.map(dateStr => {
+      const entry = prasadamCounts.find(
+        (c: PrasadamCount) => c.devotee_id === selectedDevoteeForEdit.id && c.date === dateStr
+      );
+      const b = entry?.breakfast_count || 0;
+      const l = entry?.lunch_count || 0;
+      const d = entry?.dinner_count || 0;
+      const cost = calculateMealsCost(b, l, d);
+      return {
+        dateStr,
+        b,
+        l,
+        d,
+        cost,
+        entry,
+      };
+    });
+  }, [selectedDevoteeForEdit, datesForMonth, prasadamCounts]);
+
+  const {
+    sortedData: sortedDevoteeDailyEntries,
+    sortConfig: modalSortConfig,
+    requestSort: requestModalSort,
+  } = useTableSort(devoteeDailyEntries, {
+    initialConfig: { key: 'dateStr', direction: 'asc' },
+  });
+
+  const handleExportDevoteeDailyMeals = () => {
+    if (!selectedDevoteeForEdit || sortedDevoteeDailyEntries.length === 0) return;
+
+    const devoteeName = formatDevoteeName(selectedDevoteeForEdit);
+    const exportData = sortedDevoteeDailyEntries.map(item => ({
+      'Date': item.dateStr,
+      'Day': new Date(item.dateStr).toLocaleDateString('en-US', { weekday: 'short' }),
+      'Devotee Group': devoteeName,
+      'Breakfast (B)': item.b,
+      'Lunch (L)': item.l,
+      'Dinner (D)': item.d,
+      'Total Meals': item.b + item.l + item.d,
+      'Day Cost (₹)': item.cost,
+    }));
+
+    exportTableToExcel(
+      exportData,
+      `Meals_${devoteeName.replace(/\s+/g, '_')}_${activeMonth}`,
+      'Daily Meals'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Table Exported',
+      message: 'Daily meals exported in current sorted order.',
+    });
+  };
+
+  // 6. DEVOTEES DIRECTORY EXPORT
+  const handleExportDevoteesDirectory = () => {
+    if (devotees.length === 0) return;
+
+    const filteredDevoteesList = devotees.filter(d => {
+      if (!searchTerm.trim()) return true;
+      const term = searchTerm.toLowerCase();
+      const name = (d.group_name || '').toLowerCase();
+      const phone = (d.phone_number || '').toLowerCase();
+      const members = getFamilyMemberNames(d).join(' ').toLowerCase();
+      return name.includes(term) || phone.includes(term) || members.includes(term);
+    });
+
+    const exportData = filteredDevoteesList.map(d => {
+      const pureFamily = getPureFamilyMembers(d);
+      const friends = getFriendMembers(d);
+      return {
+        'Group Name': d.group_name,
+        'Display Name': formatDevoteeName(d),
+        'Primary Phone': d.phone_number,
+        'Is Admin': d.is_admin ? 'YES' : 'NO',
+        'Community Cost (₹/member)': typeof d.community_cost === 'number' ? d.community_cost : communityCostPerMember,
+        'Family Members Count': pureFamily.length,
+        'Family Members': pureFamily.map(m => m.name + (m.phone_number ? ` (${m.phone_number})` : '')).join(', '),
+        'Friends Count': friends.length,
+        'Friends': friends.map(f => f.name).join(', '),
+      };
+    });
+
+    exportTableToExcel(
+      exportData,
+      `Registered_Devotees_Directory`,
+      'Devotees'
+    );
+
+    showToast({
+      type: 'success',
+      title: 'Directory Exported',
+      message: 'Devotee directory exported to Excel.',
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-28">
       {/* 1. Admin Header & Quick Metrics */}
@@ -703,6 +1073,17 @@ export const AdminPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2">
               <Button
+                onClick={handleExportMasterLedger}
+                variant="outline"
+                size="sm"
+                className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                title="Export currently sorted master ledger to Excel"
+              >
+                <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                <span>Export Table (.xlsx)</span>
+              </Button>
+
+              <Button
                 onClick={handleTriggerAutoFillAll}
                 variant="secondary"
                 size="sm"
@@ -729,21 +1110,92 @@ export const AdminPage: React.FC = () => {
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
                   <tr>
-                    <th className="py-3 px-3">Devotee (Click to View)</th>
-                    <th className="py-3 px-3">Phone</th>
-                    <th className="py-3 px-3 text-center">Meals</th>
-                    <th className="py-3 px-3 text-right">Meals Cost</th>
-                    <th className="py-3 px-3 text-right">Community Cost</th>
-                    <th className="py-3 px-3 text-right">Total Prasadam</th>
-                    <th className="py-3 px-3 text-right">Expenses</th>
-                    <th className="py-3 px-3 text-right">Carry Fwd</th>
-                    <th className="py-3 px-3 text-right">Final Balance</th>
-                    <th className="py-3 px-3 text-center">Status</th>
-                    <th className="py-3 px-3 text-center">Actions</th>
+                    <SortableHeader
+                      label="Devotee (Click to View)"
+                      sortKey="group_name"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                    />
+                    <SortableHeader
+                      label="Phone"
+                      sortKey="phone_number"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                    />
+                    <SortableHeader
+                      label="Meals"
+                      sortKey="total_meals"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="center"
+                    />
+                    <SortableHeader
+                      label="Meals Cost"
+                      sortKey="meals_cost"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Community Cost"
+                      sortKey="community_cost"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Total Prasadam"
+                      sortKey="prasadam_cost"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Expenses"
+                      sortKey="approved_expenses"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Carry Fwd"
+                      sortKey="carried_forward"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Final Balance"
+                      sortKey="final_balance"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="right"
+                    />
+                    <SortableHeader
+                      label="Status"
+                      sortKey="settlement_status"
+                      currentSortKey={matrixSortConfig?.key}
+                      currentDirection={matrixSortConfig?.direction}
+                      onSort={requestMatrixSort}
+                      align="center"
+                    />
+                    <SortableHeader
+                      label="Actions"
+                      align="center"
+                    />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                  {filteredSummaries.map(s => {
+                  {sortedSummaries.map(s => {
                     const displayName = formatDevoteeName(s.devotee);
                     const hasMultiple = s.devotee.family_members && s.devotee.family_members.length > 1;
 
@@ -990,27 +1442,40 @@ export const AdminPage: React.FC = () => {
                   </p>
                 </div>
 
-                {/* Filter Pills */}
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
-                  {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map(status => (
-                    <button
-                      key={status}
-                      type="button"
-                      onClick={() => setRegularStatusFilter(status)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                        regularStatusFilter === status
-                          ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
-                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                      }`}
-                    >
-                      {status}
-                      {status === 'PENDING' && pendingRegularCount > 0 && (
-                        <span className="ml-1 px-1 py-0.2 rounded-full text-[9px] bg-amber-500 text-white">
-                          {pendingRegularCount}
-                        </span>
-                      )}
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={handleExportRegularExpenses}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 py-1 px-2.5 h-auto"
+                    title="Export currently filtered and sorted regular expenses to Excel"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                    <span>Export Regular Expenses (.xlsx)</span>
+                  </Button>
+
+                  {/* Filter Pills */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
+                    {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map(status => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => setRegularStatusFilter(status)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          regularStatusFilter === status
+                            ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {status}
+                        {status === 'PENDING' && pendingRegularCount > 0 && (
+                          <span className="ml-1 px-1 py-0.2 rounded-full text-[9px] bg-amber-500 text-white">
+                            {pendingRegularCount}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1019,25 +1484,69 @@ export const AdminPage: React.FC = () => {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b">
                       <tr>
-                        <th className="py-3 px-3">Expense Date</th>
-                        <th className="py-3 px-3">Submitted At</th>
-                        <th className="py-3 px-3">Item / Description</th>
-                        <th className="py-3 px-3">Payer / Devotee</th>
-                        <th className="py-3 px-3 text-right">Amount</th>
-                        <th className="py-3 px-3 text-center">Receipt</th>
-                        <th className="py-3 px-3 text-center">Status</th>
-                        <th className="py-3 px-3 text-center">Action</th>
+                        <SortableHeader
+                          label="Expense Date"
+                          sortKey="date"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                        />
+                        <SortableHeader
+                          label="Submitted At"
+                          sortKey="created_at"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                        />
+                        <SortableHeader
+                          label="Item / Description"
+                          sortKey="title"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                        />
+                        <SortableHeader
+                          label="Payer / Devotee"
+                          sortKey="payer_name"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                        />
+                        <SortableHeader
+                          label="Amount"
+                          sortKey="amount"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                          align="right"
+                        />
+                        <SortableHeader
+                          label="Receipt"
+                          align="center"
+                        />
+                        <SortableHeader
+                          label="Status"
+                          sortKey="status"
+                          currentSortKey={regularSortConfig?.key}
+                          currentDirection={regularSortConfig?.direction}
+                          onSort={requestRegularSort}
+                          align="center"
+                        />
+                        <SortableHeader
+                          label="Action"
+                          align="center"
+                        />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                      {filteredRegularExpenses.length === 0 ? (
+                      {sortedRegularExpenses.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="py-8 text-center text-slate-400">
                             No regular expenses found matching current filter for {formatMonthName(activeMonth)}.
                           </td>
                         </tr>
                       ) : (
-                        filteredRegularExpenses.map(exp => {
+                        sortedRegularExpenses.map(exp => {
                           const devotee = devotees.find(d => d.id === exp.devotee_id);
                           return (
                             <tr key={exp.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -1073,15 +1582,14 @@ export const AdminPage: React.FC = () => {
                               </td>
                               <td className="py-3 px-3 text-center">
                                 {exp.bill_url ? (
-                                  <a
-                                    href={exp.bill_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-amber-600 dark:text-amber-400 hover:underline font-bold inline-flex items-center gap-1"
+                                  <button
+                                    type="button"
+                                    onClick={() => setAdminViewingReceiptUrl(exp.bill_url!)}
+                                    className="text-amber-600 dark:text-amber-400 hover:underline font-bold inline-flex items-center gap-1 text-xs"
                                   >
                                     <Eye className="w-3.5 h-3.5" />
-                                    <span>View</span>
-                                  </a>
+                                    <span>View ({parseReceiptUrls(exp.bill_url).length})</span>
+                                  </button>
                                 ) : (
                                   <span className="text-slate-400">-</span>
                                 )}
@@ -1201,36 +1709,87 @@ export const AdminPage: React.FC = () => {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>Sri Krishna Janmashtami Festival Expenses ({filteredJanmashtamiExpenses.length})</span>
+                    <Crown className="w-4 h-4 text-amber-500" />
+                    <span>Special Festival Expenses ({filteredJanmashtamiExpenses.length})</span>
                     <Badge variant="saffron" size="sm" className="text-[10px]">All Time</Badge>
                   </h3>
                   <p className="text-xs text-slate-400">
-                    All-time Janmashtami festival purchases and sponsorships (isolated account, cumulative across all dates).
+                    Festival purchases and seva sponsorships for Prabhupada Appearance Day & Janmashtami (all-time isolated accounts).
                   </p>
                 </div>
 
-                {/* Filter Pills */}
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
-                  {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map(status => (
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Festival Selector Pills */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
                     <button
-                      key={status}
                       type="button"
-                      onClick={() => setJanmashtamiStatusFilter(status)}
+                      onClick={() => setFestivalTypeFilter('ALL')}
                       className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                        janmashtamiStatusFilter === status
+                        festivalTypeFilter === 'ALL'
                           ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
                           : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                       }`}
                     >
-                      {status}
-                      {status === 'PENDING' && pendingJanmashtamiCount > 0 && (
-                        <span className="ml-1 px-1 py-0.2 rounded-full text-[9px] bg-amber-500 text-white">
-                          {pendingJanmashtamiCount}
-                        </span>
-                      )}
+                      All Festivals
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => setFestivalTypeFilter('PRABHUPADA_APPEARANCE')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                        festivalTypeFilter === 'PRABHUPADA_APPEARANCE'
+                          ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <Crown className="w-3 h-3" />
+                      <span>Appearance Day</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFestivalTypeFilter('JANMASHTAMI')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                        festivalTypeFilter === 'JANMASHTAMI'
+                          ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
+                          : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      <span>Janmashtami</span>
+                    </button>
+                  </div>
+
+                  <Button
+                    onClick={handleExportJanmashtamiExpenses}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 py-1 px-2.5 h-auto"
+                    title="Export currently filtered and sorted festival expenses to Excel"
+                  >
+                    <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                    <span>Export Excel (.xlsx)</span>
+                  </Button>
+
+                  {/* Filter Pills */}
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl">
+                    {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map(status => (
+                      <button
+                        key={status}
+                        type="button"
+                        onClick={() => setJanmashtamiStatusFilter(status)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                          janmashtamiStatusFilter === status
+                            ? 'bg-white dark:bg-slate-700 text-amber-600 dark:text-amber-400 shadow-xs'
+                            : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {status}
+                        {status === 'PENDING' && pendingJanmashtamiCount > 0 && (
+                          <span className="ml-1 px-1 py-0.2 rounded-full text-[9px] bg-amber-500 text-white">
+                            {pendingJanmashtamiCount}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1239,25 +1798,69 @@ export const AdminPage: React.FC = () => {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold border-b">
                       <tr>
-                        <th className="py-3 px-3">Expense Date</th>
-                        <th className="py-3 px-3">Submitted At</th>
-                        <th className="py-3 px-3">Item / Description</th>
-                        <th className="py-3 px-3">Payer / Devotee</th>
-                        <th className="py-3 px-3 text-right">Amount</th>
-                        <th className="py-3 px-3 text-center">Receipt</th>
-                        <th className="py-3 px-3 text-center">Status</th>
-                        <th className="py-3 px-3 text-center">Action</th>
+                        <SortableHeader
+                          label="Expense Date"
+                          sortKey="date"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                        />
+                        <SortableHeader
+                          label="Submitted At"
+                          sortKey="created_at"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                        />
+                        <SortableHeader
+                          label="Item / Description"
+                          sortKey="title"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                        />
+                        <SortableHeader
+                          label="Payer / Devotee"
+                          sortKey="payer_name"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                        />
+                        <SortableHeader
+                          label="Amount"
+                          sortKey="amount"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                          align="right"
+                        />
+                        <SortableHeader
+                          label="Receipt"
+                          align="center"
+                        />
+                        <SortableHeader
+                          label="Status"
+                          sortKey="status"
+                          currentSortKey={janmashtamiSortConfig?.key}
+                          currentDirection={janmashtamiSortConfig?.direction}
+                          onSort={requestJanmashtamiSort}
+                          align="center"
+                        />
+                        <SortableHeader
+                          label="Action"
+                          align="center"
+                        />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                      {filteredJanmashtamiExpenses.length === 0 ? (
+                      {sortedJanmashtamiExpenses.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="py-8 text-center text-slate-400">
                             No Janmashtami festival expenses found matching current filter (All Time).
                           </td>
                         </tr>
                       ) : (
-                        filteredJanmashtamiExpenses.map(exp => {
+                        sortedJanmashtamiExpenses.map(exp => {
                           const devotee = devotees.find(d => d.id === exp.devotee_id);
                           return (
                             <tr key={exp.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
@@ -1270,7 +1873,13 @@ export const AdminPage: React.FC = () => {
                               <td className="py-3 px-3">
                                 <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                                   <span>{exp.title}</span>
-                                  <Badge variant="saffron" size="sm" className="text-[9px] px-1 py-0">Janmashtami</Badge>
+                                  {exp.type === 'PRABHUPADA_APPEARANCE' ? (
+                                    <Badge variant="saffron" size="sm" className="text-[9px] px-1 py-0 flex items-center gap-0.5">
+                                      <Crown className="w-2.5 h-2.5" /> Appearance Day
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" size="sm" className="text-[9px] px-1 py-0">Janmashtami</Badge>
+                                  )}
                                 </div>
                                 {exp.comments && (
                                   <div className="text-[10px] text-slate-400">{exp.comments}</div>
@@ -1294,15 +1903,14 @@ export const AdminPage: React.FC = () => {
                               </td>
                               <td className="py-3 px-3 text-center">
                                 {exp.bill_url ? (
-                                  <a
-                                    href={exp.bill_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-amber-600 dark:text-amber-400 hover:underline font-bold inline-flex items-center gap-1"
+                                  <button
+                                    type="button"
+                                    onClick={() => setAdminViewingReceiptUrl(exp.bill_url!)}
+                                    className="text-amber-600 dark:text-amber-400 hover:underline font-bold inline-flex items-center gap-1 text-xs"
                                   >
                                     <Eye className="w-3.5 h-3.5" />
-                                    <span>View</span>
-                                  </a>
+                                    <span>View ({parseReceiptUrls(exp.bill_url).length})</span>
+                                  </button>
                                 ) : (
                                   <span className="text-slate-400">-</span>
                                 )}
@@ -1487,36 +2095,49 @@ export const AdminPage: React.FC = () => {
                 </p>
               </div>
 
-              {/* Status Filter Tabs */}
-              <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-xs font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setSettlementFilter('ALL')}
-                  className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={handleExportSettlementTable}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 py-1 px-2.5 h-auto"
+                  title="Export currently filtered and sorted settlement records to Excel"
                 >
-                  All ({allDevoteeSummaries.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSettlementFilter('PENDING')}
-                  className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'PENDING' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
-                >
-                  Pending ({allDevoteeSummaries.filter(s => s.settlement_status === 'PENDING_VERIFICATION').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSettlementFilter('SETTLED')}
-                  className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'SETTLED' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
-                >
-                  Settled ({allDevoteeSummaries.filter(s => s.settlement_status === 'SETTLED').length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSettlementFilter('UNSETTLED')}
-                  className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'UNSETTLED' ? 'bg-rose-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
-                >
-                  Unsettled ({allDevoteeSummaries.filter(s => s.settlement_status === 'UNSETTLED').length})
-                </button>
+                  <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                  <span>Export Settlement Table (.xlsx)</span>
+                </Button>
+
+                {/* Status Filter Tabs */}
+                <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setSettlementFilter('ALL')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'ALL' ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                  >
+                    All ({allDevoteeSummaries.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettlementFilter('PENDING')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'PENDING' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                  >
+                    Pending ({allDevoteeSummaries.filter(s => s.settlement_status === 'PENDING_VERIFICATION').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettlementFilter('SETTLED')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'SETTLED' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                  >
+                    Settled ({allDevoteeSummaries.filter(s => s.settlement_status === 'SETTLED').length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettlementFilter('UNSETTLED')}
+                    className={`px-2.5 py-1.5 rounded-lg transition-colors ${settlementFilter === 'UNSETTLED' ? 'bg-rose-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+                  >
+                    Unsettled ({allDevoteeSummaries.filter(s => s.settlement_status === 'UNSETTLED').length})
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1525,26 +2146,76 @@ export const AdminPage: React.FC = () => {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-700">
                     <tr>
-                      <th className="py-3 px-3 text-left">Devotee Group</th>
-                      <th className="py-3 px-3 text-left">Phone</th>
-                      <th className="py-3 px-3 text-right">Prasadam Cost</th>
-                      <th className="py-3 px-3 text-right">Expenses</th>
-                      <th className="py-3 px-3 text-right">Carry Fwd</th>
-                      <th className="py-3 px-3 text-right">Payment Recorded</th>
-                      <th className="py-3 px-3 text-center">Settlement Status</th>
-                      <th className="py-3 px-3 text-right">Final Balance</th>
-                      <th className="py-3 px-3 text-center">Action</th>
+                      <SortableHeader
+                        label="Devotee Group"
+                        sortKey="group_name"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                      />
+                      <SortableHeader
+                        label="Phone"
+                        sortKey="phone_number"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                      />
+                      <SortableHeader
+                        label="Prasadam Cost"
+                        sortKey="prasadam_cost"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="right"
+                      />
+                      <SortableHeader
+                        label="Expenses"
+                        sortKey="approved_expenses"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="right"
+                      />
+                      <SortableHeader
+                        label="Carry Fwd"
+                        sortKey="carried_forward"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="right"
+                      />
+                      <SortableHeader
+                        label="Payment Recorded"
+                        sortKey="settlement_reported"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="right"
+                      />
+                      <SortableHeader
+                        label="Settlement Status"
+                        sortKey="settlement_status"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="center"
+                      />
+                      <SortableHeader
+                        label="Final Balance"
+                        sortKey="final_balance"
+                        currentSortKey={settlementSortConfig?.key}
+                        currentDirection={settlementSortConfig?.direction}
+                        onSort={requestSettlementSort}
+                        align="right"
+                      />
+                      <SortableHeader
+                        label="Action"
+                        align="center"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                    {filteredSummaries
-                      .filter(s => {
-                        if (settlementFilter === 'PENDING') return s.settlement_status === 'PENDING_VERIFICATION';
-                        if (settlementFilter === 'SETTLED') return s.settlement_status === 'SETTLED';
-                        if (settlementFilter === 'UNSETTLED') return s.settlement_status === 'UNSETTLED';
-                        return true;
-                      })
-                      .map(s => (
+                    {sortedSettlementList.map(s => (
                         <tr key={s.devotee.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
                           <td className="py-3 px-3 font-bold text-slate-900 dark:text-white">
                             {formatDevoteeName(s.devotee)}
@@ -1775,19 +2446,32 @@ export const AdminPage: React.FC = () => {
       {/* TAB 5: DEVOTEES & GUEST MANAGEMENT */}
       {activeAdminTab === 'devotees' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">
               Registered Devotees ({devotees.length})
             </h3>
-            <Button
-              onClick={() => handleOpenDevoteeModal()}
-              variant="saffron"
-              size="sm"
-              className="text-xs"
-            >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              <span>Add Devotee</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                onClick={handleExportDevoteesDirectory}
+                variant="outline"
+                size="sm"
+                className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                title="Export complete devotee directory to Excel"
+              >
+                <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                <span>Export Devotees (.xlsx)</span>
+              </Button>
+              <Button
+                onClick={() => handleOpenDevoteeModal()}
+                variant="saffron"
+                size="sm"
+                className="text-xs"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                <span>Add Devotee</span>
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -1931,26 +2615,58 @@ export const AdminPage: React.FC = () => {
             </form>
           </Card>
 
+          {/* Environment & Data Source Status */}
+          <Card className={`p-5 border ${isLocalMode ? 'border-amber-200 dark:border-amber-900/50 bg-amber-50/10' : 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/10'}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`w-2.5 h-2.5 rounded-full ${isLocalMode ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                  <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                    Data Environment: {isLocalMode ? 'Local Isolated Mode' : 'Production Supabase Cloud'}
+                  </h4>
+                  <Badge variant={isLocalMode ? 'saffron' : 'success'} size="sm">
+                    {isLocalMode ? 'Local Storage (Dev)' : 'Cloud PostgreSQL (Live)'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {isLocalMode
+                    ? 'Operating in local developer mode. All devotees, prasadam counts, and expenses are saved exclusively in your local browser storage (gnh_local_*). Live Production data is safe and protected.'
+                    : 'Connected to live Production Supabase database. Real-time updates are active.'}
+                </p>
+              </div>
+            </div>
+          </Card>
+
           {/* Database Reset & Seeding Tool */}
           <Card className="p-5 border border-rose-200 dark:border-rose-900 bg-rose-50/10">
             <h4 className="text-sm font-bold text-rose-600 dark:text-rose-400 flex items-center gap-2 mb-2">
               <Database className="w-4 h-4" />
-              <span>Reset / Restore Initial Seed Data</span>
+              <span>{isLocalMode ? 'Reset Local Test Data to Seed Defaults' : 'Reset / Restore Initial Seed Data'}</span>
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              Restores the registered Vaishnava devotee roster from seed configuration and resets all meal counts and expenses to zero.
+              {isLocalMode
+                ? 'Restores the 14 Vaishnava devotees roster from seed configuration in your local storage and resets all local meal counts and expenses to zero.'
+                : 'Restores the registered Vaishnava devotee roster from seed configuration and resets all meal counts and expenses to zero.'}
             </p>
             <Button
               onClick={() => {
-                if (confirm('Are you sure you want to reset local data to defaults?')) {
+                const msg = isLocalMode
+                  ? 'Are you sure you want to reset local test data back to default seed roster?'
+                  : 'Are you sure you want to reset data to defaults?';
+                if (confirm(msg)) {
                   resetDatabase();
+                  showToast({
+                    type: 'success',
+                    title: 'Database Reset',
+                    message: isLocalMode ? 'Local test data reset to initial seed defaults.' : 'Database reset to seed defaults.',
+                  });
                 }
               }}
               variant="danger"
               size="sm"
             >
               <Trash2 className="w-3.5 h-3.5 mr-1" />
-              <span>Reset Database to Defaults</span>
+              <span>{isLocalMode ? 'Reset Local Data to Defaults' : 'Reset Database to Defaults'}</span>
             </Button>
           </Card>
         </div>
@@ -1966,30 +2682,74 @@ export const AdminPage: React.FC = () => {
       >
         {selectedDevoteeForEdit && (
           <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-            <div className="text-xs text-slate-500">
-              Primary Phone: {selectedDevoteeForEdit.phone_number} {selectedDevoteeForEdit.family_members.length > 1 ? `• Family: ${formatDevoteeFamilyDisplay(selectedDevoteeForEdit, true)}` : ''}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-xs text-slate-500">
+                Primary Phone: {selectedDevoteeForEdit.phone_number} {selectedDevoteeForEdit.family_members.length > 1 ? `• Family: ${formatDevoteeFamilyDisplay(selectedDevoteeForEdit, true)}` : ''}
+              </div>
+              <Button
+                type="button"
+                onClick={handleExportDevoteeDailyMeals}
+                variant="outline"
+                size="sm"
+                className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 py-1 px-2.5 h-auto self-start sm:self-auto"
+                title="Export this devotee's meal counts for the month"
+              >
+                <Download className="w-3.5 h-3.5 mr-1 text-emerald-600 dark:text-emerald-400" />
+                <span>Export (.xlsx)</span>
+              </Button>
             </div>
 
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 font-bold border-b">
+              <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 font-bold border-b z-10">
                 <tr>
-                  <th className="py-2 px-2">Date</th>
-                  <th className="py-2 px-2 text-center">B (₹40)</th>
-                  <th className="py-2 px-2 text-center">L (₹80)</th>
-                  <th className="py-2 px-2 text-center">D (₹40)</th>
-                  <th className="py-2 px-2 text-right">Day Cost</th>
+                  <SortableHeader
+                    label="Date"
+                    sortKey="dateStr"
+                    currentSortKey={modalSortConfig?.key}
+                    currentDirection={modalSortConfig?.direction}
+                    onSort={requestModalSort}
+                    className="py-2 px-2"
+                  />
+                  <SortableHeader
+                    label="B (₹40)"
+                    sortKey="b"
+                    currentSortKey={modalSortConfig?.key}
+                    currentDirection={modalSortConfig?.direction}
+                    onSort={requestModalSort}
+                    align="center"
+                    className="py-2 px-2"
+                  />
+                  <SortableHeader
+                    label="L (₹80)"
+                    sortKey="l"
+                    currentSortKey={modalSortConfig?.key}
+                    currentDirection={modalSortConfig?.direction}
+                    onSort={requestModalSort}
+                    align="center"
+                    className="py-2 px-2"
+                  />
+                  <SortableHeader
+                    label="D (₹40)"
+                    sortKey="d"
+                    currentSortKey={modalSortConfig?.key}
+                    currentDirection={modalSortConfig?.direction}
+                    onSort={requestModalSort}
+                    align="center"
+                    className="py-2 px-2"
+                  />
+                  <SortableHeader
+                    label="Day Cost"
+                    sortKey="cost"
+                    currentSortKey={modalSortConfig?.key}
+                    currentDirection={modalSortConfig?.direction}
+                    onSort={requestModalSort}
+                    align="right"
+                    className="py-2 px-2"
+                  />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {datesForMonth.map(dateStr => {
-                  const entry = prasadamCounts.find(
-                    (c: PrasadamCount) => c.devotee_id === selectedDevoteeForEdit.id && c.date === dateStr
-                  );
-                  const b = entry?.breakfast_count || 0;
-                  const l = entry?.lunch_count || 0;
-                  const d = entry?.dinner_count || 0;
-                  const cost = calculateMealsCost(b, l, d);
-
+                {sortedDevoteeDailyEntries.map(({ dateStr, b, l, d, cost, entry }) => {
                   return (
                     <tr key={dateStr}>
                       <td className="py-1.5 px-2 font-mono font-bold">{dateStr.slice(8)} {new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short' })}</td>
@@ -2422,6 +3182,14 @@ export const AdminPage: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Multi-Receipt Viewer Modal */}
+      <ReceiptViewerModal
+        isOpen={Boolean(adminViewingReceiptUrl)}
+        onClose={() => setAdminViewingReceiptUrl(null)}
+        billUrl={adminViewingReceiptUrl}
+        title="Expense Receipt Attachments"
+      />
     </div>
   );
 };

@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
+  Crown,
   Users,
   UserCheck,
   Bell,
@@ -126,13 +127,19 @@ export const ReportsPage: React.FC = () => {
   const devoteeExpenses: Expense[] = expenses.filter(
     (e: Expense) =>
       (activeDevotee ? e.devotee_id === activeDevotee.id : (guestName ? e.guest_name === guestName : true)) &&
-      (e.cycle_month === activeMonth || (e.date && e.date.startsWith(activeMonth)) || e.type === 'JANMASHTAMI')
+      (e.cycle_month === activeMonth || (e.date && e.date.startsWith(activeMonth)) || e.type === 'JANMASHTAMI' || e.type === 'PRABHUPADA_APPEARANCE')
   );
 
   const regularExpenses: Expense[] = devoteeExpenses.filter((e: Expense) => e.type === 'REGULAR');
+
+  const prabhupadaExpenses: Expense[] = devoteeExpenses.filter((e: Expense) => e.type === 'PRABHUPADA_APPEARANCE');
+  const totalPrabhupadaDevotee: number = prabhupadaExpenses
+    .filter((e: Expense) => e.status === 'APPROVED' || e.status === 'PENDING')
+    .reduce((sum: number, e: Expense) => sum + Number(e.amount), 0);
+
   const janmashtamiExpenses: Expense[] = devoteeExpenses.filter((e: Expense) => e.type === 'JANMASHTAMI');
   const totalJanmashtamiDevotee: number = janmashtamiExpenses
-    .filter((e: Expense) => e.status === 'APPROVED')
+    .filter((e: Expense) => e.status === 'APPROVED' || e.status === 'PENDING')
     .reduce((sum: number, e: Expense) => sum + Number(e.amount), 0);
 
   const hasMultipleMembers = Boolean(
@@ -500,29 +507,104 @@ export const ReportsPage: React.FC = () => {
         </Card>
       )}
 
-      {/* 3. Krishna Janmashtami Dedicated Festival Balance Card */}
-      <Card className="p-5 sm:p-6 border border-amber-500/20 bg-gradient-to-br from-amber-500/5 via-transparent to-orange-500/5">
+      {/* 3. Srila Prabhupada Appearance Day Dedicated Festival Balance Card */}
+      <Card className="p-5 sm:p-6 border border-amber-500/30 bg-gradient-to-br from-amber-500/10 via-transparent to-orange-500/5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-2xl bg-amber-500/20 text-amber-600 dark:text-amber-400">
-              <Sparkles className="w-6 h-6" />
+              <Crown className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Srila Prabhupada Appearance Day Expenses
+                </h3>
+                <Badge variant="saffron">Active Festival</Badge>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Vyasa-Puja seva contributions and expenses (all-time, isolated from monthly meal billing)
+              </p>
+            </div>
+          </div>
+
+          <div className="text-left sm:text-right">
+            <span className="text-xs text-slate-400 font-medium">Your Appearance Day Seva</span>
+            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+              {formatRupee(totalPrabhupadaDevotee)}
+            </div>
+          </div>
+        </div>
+
+        {prabhupadaExpenses.length > 0 ? (
+          <div className="space-y-2 mt-4">
+            {prabhupadaExpenses.map((exp: Expense) => (
+              <div
+                key={exp.id}
+                className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs"
+              >
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-slate-900 dark:text-white">
+                    {exp.title}
+                  </div>
+                  <div className="text-slate-400 text-[11px]">
+                    By {exp.payer_name} • Expense: {formatExpenseDate(exp.date || exp.created_at)} • Submitted: {formatSubmissionDateTime(exp.created_at)}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={exp.status === 'APPROVED' ? 'success' : exp.status === 'PENDING' ? 'warning' : 'danger'}>
+                    {exp.status === 'APPROVED' ? 'Approved' : exp.status === 'PENDING' ? 'Pending Approval' : 'Rejected'}
+                  </Badge>
+                  <span className="font-bold text-sm text-slate-900 dark:text-slate-100">
+                    {formatRupee(exp.amount)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center text-xs text-slate-400">
+            No Prabhupada Appearance Day expenses logged yet for this devotee.
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <Button
+            onClick={() => setActiveTab('appearance_day')}
+            variant="saffron"
+            size="sm"
+            className="text-xs"
+          >
+            <span>Open Appearance Day Ledger</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-1" />
+          </Button>
+        </div>
+      </Card>
+
+      {/* 4. Krishna Janmashtami Completed Festival Balance Card */}
+      <Card className="p-5 sm:p-6 border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+              <Sparkles className="w-6 h-6 text-amber-500" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                   Krishna Janmashtami Expenses
                 </h3>
-                <Badge variant="saffron">All-Time Ledger</Badge>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                  Completed & Archived
+                </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Special festival contributions and expenses for all time (not categorized by month, isolated from monthly meal billing)
+                Historical Janmashtami 2026 festival contributions and seva expenses
               </p>
             </div>
           </div>
 
           <div className="text-left sm:text-right">
-            <span className="text-xs text-slate-400 font-medium">Your Janmashtami Expenses</span>
-            <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+            <span className="text-xs text-slate-400 font-medium">Your Janmashtami Total</span>
+            <div className="text-xl font-bold text-slate-800 dark:text-slate-200">
               {formatRupee(totalJanmashtamiDevotee)}
             </div>
           </div>
@@ -555,19 +637,19 @@ export const ReportsPage: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center text-xs text-slate-400">
-            No Janmashtami festival expenses logged yet for this devotee.
+          <div className="p-4 rounded-xl bg-slate-100/60 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700 text-center text-xs text-slate-400">
+            No Janmashtami festival expenses logged for this devotee.
           </div>
         )}
 
         <div className="mt-4 flex justify-end">
           <Button
-            onClick={() => setActiveTab('janmashtami')}
+            onClick={() => setActiveTab('appearance_day')}
             variant="outline"
             size="sm"
             className="text-xs"
           >
-            <span>Open Janmashtami Ledger</span>
+            <span>View All Festival Records</span>
             <ArrowRight className="w-3.5 h-3.5 ml-1" />
           </Button>
         </div>

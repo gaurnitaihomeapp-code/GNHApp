@@ -244,7 +244,7 @@ export const LoginPage: React.FC = () => {
                   className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-2xl text-slate-900 dark:text-white text-sm focus:border-amber-500 outline-none"
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Guests can log grocery/seva expenses and Janmashtami contributions.
+                  Guests can log regular grocery/seva expenses and festival seva contributions.
                 </p>
               </div>
 
