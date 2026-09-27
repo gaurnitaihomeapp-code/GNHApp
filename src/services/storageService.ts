@@ -868,7 +868,7 @@ class StorageService {
 
     for (const item of summaries) {
       const existingNext = nextMap.get(item.devoteeId);
-      const hasExistingSettlement = Boolean(existingNext && existingNext.settlement_amount_reported > 0);
+      const hasExistingSettlement = Boolean(existingNext && existingNext.settlement_amount_reported !== 0);
       const updated: MonthlyLedger = {
         id: existingNext?.id,
         devotee_id: item.devoteeId,

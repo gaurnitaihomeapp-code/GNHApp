@@ -49,6 +49,7 @@ export const ReportsPage: React.FC = () => {
     expenses,
     setIsLoginModalOpen,
     setIsNotificationModalOpen,
+    showToast,
   } = useApp();
 
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
@@ -61,6 +62,10 @@ export const ReportsPage: React.FC = () => {
   const summary = currentDevoteeSummary;
 
   const handleOpenSettleModal = () => {
+    if (!activeDevotee) {
+      setIsLoginModalOpen(true);
+      return;
+    }
     if (summary) {
       if (summary.settlement_reported !== 0) {
         setSettleAmount(summary.settlement_reported.toString());
@@ -78,6 +83,11 @@ export const ReportsPage: React.FC = () => {
     e.preventDefault();
     const amountNum = parseFloat(settleAmount);
     if (isNaN(amountNum) || amountNum === 0) {
+      showToast({
+        type: 'error',
+        title: 'Invalid Amount',
+        message: 'Please enter a valid non-zero settlement amount.',
+      });
       return;
     }
 

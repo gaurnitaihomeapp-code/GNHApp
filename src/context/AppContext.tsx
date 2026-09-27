@@ -551,7 +551,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const requestSettlement = async (amount: number, date: string, notes?: string) => {
-    if (!activeDevotee) return;
+    if (!activeDevotee) {
+      showToast({
+        type: 'error',
+        title: 'Devotee Login Required',
+        message: 'Please log in with your registered mobile number to submit a settlement report.',
+      });
+      return;
+    }
     const saved = await storageService.requestDevoteeSettlement(activeDevotee.id, activeMonth, amount, date, notes);
     setMonthlyLedgers(prev => {
       const idx = prev.findIndex(l => l.devotee_id === activeDevotee.id && l.cycle_month === activeMonth);
