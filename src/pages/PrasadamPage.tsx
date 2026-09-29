@@ -767,7 +767,7 @@ export const PrasadamPage: React.FC = () => {
         </div>
 
         <form onSubmit={handleExpenseSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Expense Date */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
@@ -812,7 +812,7 @@ export const PrasadamPage: React.FC = () => {
             </div>
 
             {/* Title / Item with Category Presets */}
-            <div className="sm:col-span-2 lg:col-span-1">
+            <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
                   Expense Title / Category *

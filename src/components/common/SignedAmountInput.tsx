@@ -98,10 +98,10 @@ export const SignedAmountInput: React.FC<SignedAmountInputProps> = ({
                   ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs border border-emerald-500/20'
                   : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
               }`}
-              title="Positive amount (+)"
+              title="Positive amount (+ve)"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Positive</span>
+              <span>+ve</span>
             </button>
             <button
               type="button"
@@ -112,10 +112,10 @@ export const SignedAmountInput: React.FC<SignedAmountInputProps> = ({
                   ? 'bg-rose-500 text-white shadow-xs font-bold'
                   : 'text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400'
               }`}
-              title="Negative amount (-)"
+              title="Negative amount (-ve)"
             >
               <Minus className="w-3.5 h-3.5" />
-              <span>Negative</span>
+              <span>-ve</span>
             </button>
           </div>
         )}
@@ -153,7 +153,7 @@ export const SignedAmountInput: React.FC<SignedAmountInputProps> = ({
       {allowNegative && isNegative && (
         <div className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1 pl-1">
           <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-          <span>Negative amount selected (refund, credit, or expense return)</span>
+          <span>-ve amount selected (refund, credit, or expense return)</span>
         </div>
       )}
     </div>
