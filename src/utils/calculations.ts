@@ -32,23 +32,23 @@ export function getAllDatesInMonth(cycleMonth: string): string[] {
 }
 
 /**
- * Calculates the Cutoff Date/Time:
- * 8:00 PM (20:00) on the N-2 day of the given month (2 days before month end).
- * e.g., for August (31 days, N=31) -> Aug 29 at 20:00:00.
+ * Calculates the Cutoff Date/Time in the implementation:
+ * 8:00 PM (20:00) on the 5th of the next month.
+ * e.g., for August 2026 (cycleMonth = '2026-08') -> 5 Sep 2026 at 20:00:00.
  */
 export function getCutoffDateTime(cycleMonth: string): Date {
   const [yearStr, monthStr] = cycleMonth.split('-');
   const year = parseInt(yearStr, 10);
-  const month = parseInt(monthStr, 10);
-  const totalDays = new Date(year, month, 0).getDate();
-  const cutoffDay = totalDays - 2;
+  const month = parseInt(monthStr, 10); // 1-indexed (e.g., 8 for August)
 
-  // Month is 0-indexed in JS Date constructor
-  return new Date(year, month - 1, cutoffDay, 20, 0, 0, 0);
+  // In JavaScript Date constructor, monthIndex is 0-indexed.
+  // Passing month (e.g. 8 for August) refers to the next month (September).
+  // Date constructor automatically rolls year forward if month === 12 (December -> January next year).
+  return new Date(year, month, 5, 20, 0, 0, 0);
 }
 
 /**
- * Returns exact formatted Cutoff Date string, e.g. "29 Aug 2026, 8:00 PM"
+ * Returns exact formatted Cutoff Date string for the implementation, e.g. "5 Sep 2026, 8:00 PM"
  */
 export function getCutoffFormattedDate(cycleMonth: string): string {
   const cutoff = getCutoffDateTime(cycleMonth);
@@ -59,13 +59,53 @@ export function getCutoffFormattedDate(cycleMonth: string): string {
 }
 
 /**
- * Returns exact formatted Cutoff Day string, e.g. "29 Aug 2026"
+ * Returns exact formatted Cutoff Day string for the implementation, e.g. "5 Sep 2026"
  */
 export function getCutoffDayFormatted(cycleMonth: string): string {
   const cutoff = getCutoffDateTime(cycleMonth);
   const day = cutoff.getDate();
   const monthName = cutoff.toLocaleDateString('en-US', { month: 'short' });
   const year = cutoff.getFullYear();
+  return `${day} ${monthName} ${year}`;
+}
+
+/**
+ * Calculates the WhatsApp Reminder Deadline Date/Time:
+ * 8:00 PM (20:00) on the last but one day of the given month (penultimate day: totalDays - 1).
+ * e.g., for August (31 days) -> Aug 30 at 20:00:00.
+ */
+export function getWhatsAppDeadlineDateTime(cycleMonth: string): Date {
+  const [yearStr, monthStr] = cycleMonth.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const totalDays = new Date(year, month, 0).getDate();
+  const lastButOneDay = totalDays - 1; // last but one day of the month
+
+  // Month is 0-indexed in JS Date constructor (month - 1)
+  return new Date(year, month - 1, lastButOneDay, 20, 0, 0, 0);
+}
+
+/**
+ * Returns formatted WhatsApp Reminder Cutoff Date string:
+ * Last but one day of the month, e.g. "30 Aug 2026, 8:00 PM"
+ */
+export function getWhatsAppDeadlineFormattedDate(cycleMonth: string): string {
+  const deadline = getWhatsAppDeadlineDateTime(cycleMonth);
+  const day = deadline.getDate();
+  const monthName = deadline.toLocaleDateString('en-US', { month: 'short' });
+  const year = deadline.getFullYear();
+  return `${day} ${monthName} ${year}, 8:00 PM`;
+}
+
+/**
+ * Returns formatted WhatsApp Reminder Cutoff Day string:
+ * e.g. "30 Aug 2026"
+ */
+export function getWhatsAppDeadlineDayFormatted(cycleMonth: string): string {
+  const deadline = getWhatsAppDeadlineDateTime(cycleMonth);
+  const day = deadline.getDate();
+  const monthName = deadline.toLocaleDateString('en-US', { month: 'short' });
+  const year = deadline.getFullYear();
   return `${day} ${monthName} ${year}`;
 }
 
@@ -143,7 +183,7 @@ export function generateCustomReminderMessage(
   phoneNumber: string = '<phoneNumber>',
   devoteeName?: string
 ): string {
-  const exactCutoff = getCutoffFormattedDate(cycleMonth);
+  const exactCutoff = getWhatsAppDeadlineFormattedDate(cycleMonth);
   const cashHandoverDay = getCashSettlementDayFormatted(cycleMonth);
   const greeting = devoteeName ? `Hare Krishna ${devoteeName}, PAMHO` : 'Hare Krishna, PAMHO';
   const baseUrl = 'https://gnh-app.vercel.app';

@@ -99,7 +99,7 @@ git push -u origin main
 | Feature | Behavior |
 | :--- | :--- |
 | **Prasadam Rates** | Breakfast: ₹40 • Lunch: ₹80 • Dinner: ₹40 |
-| **Cutoff Deadline** | 8:00 PM on the N-2 day of each month (2 days before month end). Regular inputs freeze after cutoff. |
+| **Cutoff Deadline** | 8:00 PM on the 5th of the next month (app implementation lock). WhatsApp reminders retain deadline as last but one day of the month. |
 | **Missing Count Auto-Fill** | Unfilled days auto-populate with the devotee's highest entered counts ($Max(B), Max(L), Max(D)$). |
 | **Attachment Limit** | Up to 10 MB per bill photo with client-side auto-compression. |
 | **Janmashtami Ledger** | Isolated festival accounting that is never mixed with regular monthly meal charges. |

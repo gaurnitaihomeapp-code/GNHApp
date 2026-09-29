@@ -39,6 +39,7 @@ import {
   calculateMealsCost,
   getAllDatesInMonth,
   getCutoffFormattedDate,
+  getWhatsAppDeadlineFormattedDate,
   generateCustomReminderMessage,
   formatDevoteeName,
   getNextCycleMonth,
@@ -2322,7 +2323,7 @@ export const AdminPage: React.FC = () => {
                 WhatsApp Reminders & Broadcast
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Deadline: <span className="font-semibold text-amber-600 dark:text-amber-400">{getCutoffFormattedDate(activeMonth)}</span> (N-2 days of month).
+                Deadline: <span className="font-semibold text-amber-600 dark:text-amber-400">{getWhatsAppDeadlineFormattedDate(activeMonth)}</span> (last but one day of month).
               </p>
             </div>
 
@@ -2352,7 +2353,7 @@ export const AdminPage: React.FC = () => {
                 Message Preview
               </span>
               <span className="text-[11px] font-mono text-slate-400">
-                Deadline: {getCutoffFormattedDate(activeMonth)}
+                Deadline: {getWhatsAppDeadlineFormattedDate(activeMonth)}
               </span>
             </div>
             <pre className="text-xs font-sans text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">

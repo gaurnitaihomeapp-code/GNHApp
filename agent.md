@@ -10,7 +10,7 @@
 ## Non-Negotiable Business Rules
 1. Rates: Breakfast = ₹40, Lunch = ₹80, Dinner = ₹40.
 2. Net Calculation: (Prasadam Cost) - (Approved Regular Expenses) + (Carried Forward) - (Settled Amount).
-3. Cutoff Rule: 8:00 PM on the N-2 day of the month (2 days before month end).
+3. Cutoff Rule: 8:00 PM on the 5th of the next month (app implementation lock); WhatsApp messages retain deadline as last but one day of the month.
    - User inputs freeze on cutoff.
    - Missing counts auto-fill with the devotee's maximum entered count per meal slot.
    - Admin 6-digit PIN overrides all locks.

@@ -41,7 +41,7 @@ The app supports both online cloud synchronization with **Supabase PostgreSQL** 
 - **Intuitive Meal Counters**: Quick-increment / decrement buttons and direct numeric inputs for Breakfast, Lunch, and Dinner.
 - **Dynamic Cost Feedback**: Real-time calculation of total meal charges based on active pricing.
 - **Monthly Matrix View**: Devotees and admins can inspect daily counts across all calendar days of the month.
-- **Strict Cutoff Enforcement**: Automatic freeze at **8:00 PM on the N-2 day of each month** (2 days before month end).
+- **Strict Cutoff Enforcement**: Automatic freeze at **8:00 PM on the 5th of the next month** in the implementation (while WhatsApp broadcast reminders state the deadline as the last but one day of the month).
 - **Smart Auto-Fill Algorithm**: Incomplete/empty booking days automatically backfill using the devotee's maximum entered meal count to ensure fair community catering provisions.
 
 ### 🧾 2. Expense & Receipt Logging
@@ -111,10 +111,12 @@ The app supports both online cloud synchronization with **Supabase PostgreSQL** 
 - **Zero Balance ($= ₹0$)**: Account fully settled.
 
 ### 3. Monthly Cutoff Deadline
-- **Cutoff Time**: Exactly **8:00 PM (20:00:00)** on the **N-2 day** of the active month (2 days before month end).
-  - *Example for August (31 days)*: August 29 at 8:00 PM.
-  - *Example for February (28 days)*: February 26 at 8:00 PM.
-- **Lockdown Behavior**: Once cutoff passes, devotee inputs freeze. Only the Admin PIN can unlock or edit counts.
+- **Cutoff Time (Implementation)**: Exactly **8:00 PM (20:00:00)** on the **5th of the next month**.
+  - *Example for August (2026-08)*: September 5 at 8:00 PM.
+  - *Example for February (2026-02)*: March 5 at 8:00 PM.
+  - *Example for December (2026-12)*: January 5 of the next year at 8:00 PM.
+- **WhatsApp Reminder Stated Deadline**: Stated as the **last but one day of the month** (e.g. August 30 at 8:00 PM) to ensure devotees enter counts promptly.
+- **Lockdown Behavior**: Once the implementation cutoff passes, devotee inputs freeze. Only the Admin PIN can unlock or edit counts.
 - **Countdown Timer**: Real-time countdown timer in the navbar displays remaining time before cutoff.
 
 ### 4. Missing Count Auto-Fill Algorithm
