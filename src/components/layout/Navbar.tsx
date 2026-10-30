@@ -10,8 +10,10 @@ import {
   ShieldCheck,
   Clock,
   Bell,
+  RotateCw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { forceAppUpdateAndClearCache } from '../../pwa';
 import { Button } from '../common/Button';
 import { Badge } from '../common/Badge';
 import {
@@ -43,7 +45,13 @@ export const Navbar: React.FC = () => {
   } = useApp();
 
   const [countdown, setCountdown] = useState(() => getCutoffCountdown(activeMonth));
+  const [isUpdating, setIsUpdating] = useState(false);
   const isMinMonth = activeMonth <= MIN_CYCLE_MONTH;
+
+  const handleForceUpdate = async () => {
+    setIsUpdating(true);
+    await forceAppUpdateAndClearCache();
+  };
 
   // Live countdown timer updater (ticks every second)
   useEffect(() => {
@@ -168,6 +176,17 @@ export const Navbar: React.FC = () => {
               ) : (
                 <Moon className="w-4 h-4 text-slate-600" />
               )}
+            </button>
+
+            {/* Check Updates / Reload App Button */}
+            <button
+              onClick={handleForceUpdate}
+              disabled={isUpdating}
+              className="p-2 rounded-xl text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              aria-label="Check for Updates & Reload App"
+              title="Check for Latest Updates & Reload"
+            >
+              <RotateCw className={`w-4 h-4 ${isUpdating ? 'animate-spin text-amber-500' : ''}`} />
             </button>
 
             {/* Notification Bell for logged-in devotee or guest */}
