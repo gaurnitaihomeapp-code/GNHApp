@@ -446,10 +446,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Operations
   const updatePrasadamCount = async (count: PrasadamCount) => {
     await storageService.savePrasadamCount(count);
+    const updated = await storageService.getPrasadamCounts();
+    setPrasadamCounts(updated);
   };
 
   const batchUpdatePrasadamCounts = async (counts: PrasadamCount[]) => {
     await storageService.batchSavePrasadamCounts(counts);
+    const updated = await storageService.getPrasadamCounts();
+    setPrasadamCounts(updated);
     showToast({
       type: 'success',
       title: 'Prasadam Counts Saved',
@@ -466,7 +470,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     options?: { silent?: boolean }
   ) => {
     await storageService.saveMonthlyPrasadamCounts(devoteeId, month, b, l, d);
-    const updated = await storageService.getPrasadamCounts(month);
+    const updated = await storageService.getPrasadamCounts();
     setPrasadamCounts(updated);
     if (!options?.silent) {
       showToast({

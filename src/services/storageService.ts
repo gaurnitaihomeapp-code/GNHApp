@@ -247,16 +247,50 @@ class StorageService {
   async getPrasadamCounts(cycleMonth?: string): Promise<PrasadamCount[]> {
     if (isSupabaseConfigured() && supabase) {
       try {
-        let query = supabase.from('prasadam_counts').select('*');
-        if (cycleMonth) {
-          const [yStr, mStr] = cycleMonth.split('-');
-          const lastDay = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
-          const lastDayStr = lastDay.toString().padStart(2, '0');
-          query = query.gte('date', `${cycleMonth}-01`).lte('date', `${cycleMonth}-${lastDayStr}`);
+        const PAGE_SIZE = 1000;
+        let from = 0;
+        const allFetched: PrasadamCount[] = [];
+        let fetchFailed = false;
+
+        while (true) {
+          let query = supabase.from('prasadam_counts').select('*');
+          if (cycleMonth) {
+            const [yStr, mStr] = cycleMonth.split('-');
+            const lastDay = new Date(parseInt(yStr, 10), parseInt(mStr, 10), 0).getDate();
+            const lastDayStr = lastDay.toString().padStart(2, '0');
+            query = query.gte('date', `${cycleMonth}-01`).lte('date', `${cycleMonth}-${lastDayStr}`);
+          }
+          query = query
+            .order('date', { ascending: true })
+            .order('devotee_id', { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+
+          const { data, error } = await query;
+          if (error) {
+            console.warn('Supabase getPrasadamCounts query error:', error);
+            fetchFailed = true;
+            break;
+          }
+          if (!data || data.length === 0) {
+            break;
+          }
+          allFetched.push(...(data as PrasadamCount[]));
+          if (data.length < PAGE_SIZE) {
+            break;
+          }
+          from += PAGE_SIZE;
         }
-        const { data, error } = await query;
-        if (!error && data) {
-          return data as PrasadamCount[];
+
+        if (!fetchFailed) {
+          const raw = localStorage.getItem(STORAGE_KEYS.PRASADAM_COUNTS);
+          const currentLocal: PrasadamCount[] = raw ? JSON.parse(raw) : [];
+          if (cycleMonth) {
+            const nonMonthCounts = currentLocal.filter(c => !c.date.startsWith(cycleMonth));
+            localStorage.setItem(STORAGE_KEYS.PRASADAM_COUNTS, JSON.stringify([...nonMonthCounts, ...allFetched]));
+          } else {
+            localStorage.setItem(STORAGE_KEYS.PRASADAM_COUNTS, JSON.stringify(allFetched));
+          }
+          return allFetched;
         }
       } catch (err) {
         console.warn('Supabase getPrasadamCounts failed, using localStorage fallback', err);
@@ -294,7 +328,7 @@ class StorageService {
 
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('prasadam_counts').upsert({
+        const { error } = await supabase.from('prasadam_counts').upsert({
           devotee_id: record.devotee_id,
           date: record.date,
           breakfast_count: record.breakfast_count,
@@ -302,9 +336,14 @@ class StorageService {
           dinner_count: record.dinner_count,
           is_auto_filled: record.is_auto_filled,
           updated_at: record.updated_at,
-        });
+        }, { onConflict: 'devotee_id,date' });
+        if (error) {
+          console.warn('Supabase savePrasadamCount error', error);
+          throw error;
+        }
       } catch (err) {
         console.warn('Supabase savePrasadamCount error', err);
+        throw err;
       }
     }
 
@@ -338,9 +377,14 @@ class StorageService {
           is_auto_filled: c.is_auto_filled,
           updated_at: new Date().toISOString(),
         }));
-        await supabase.from('prasadam_counts').upsert(payload, { onConflict: 'devotee_id,date' });
+        const { error } = await supabase.from('prasadam_counts').upsert(payload, { onConflict: 'devotee_id,date' });
+        if (error) {
+          console.warn('Supabase batchSavePrasadamCounts error', error);
+          throw error;
+        }
       } catch (err) {
         console.warn('Supabase batchSavePrasadamCounts error', err);
+        throw err;
       }
     }
 
@@ -470,13 +514,36 @@ class StorageService {
   async getExpenses(cycleMonth?: string): Promise<Expense[]> {
     if (isSupabaseConfigured() && supabase) {
       try {
-        let query = supabase.from('expenses').select('*').order('created_at', { ascending: false });
-        if (cycleMonth) {
-          query = query.or(`cycle_month.eq.${cycleMonth},type.eq.JANMASHTAMI,type.eq.PRABHUPADA_APPEARANCE`);
+        const PAGE_SIZE = 1000;
+        let from = 0;
+        const allFetched: any[] = [];
+        let fetchFailed = false;
+
+        while (true) {
+          let query = supabase.from('expenses').select('*');
+          if (cycleMonth) {
+            query = query.or(`cycle_month.eq.${cycleMonth},type.eq.JANMASHTAMI,type.eq.PRABHUPADA_APPEARANCE`);
+          }
+          query = query.order('created_at', { ascending: false }).range(from, from + PAGE_SIZE - 1);
+
+          const { data, error } = await query;
+          if (error) {
+            console.warn('Supabase getExpenses query error:', error);
+            fetchFailed = true;
+            break;
+          }
+          if (!data || data.length === 0) {
+            break;
+          }
+          allFetched.push(...data);
+          if (data.length < PAGE_SIZE) {
+            break;
+          }
+          from += PAGE_SIZE;
         }
-        const { data, error } = await query;
-        if (!error && data) {
-          const mapped: Expense[] = data.map((d: any) => {
+
+        if (!fetchFailed) {
+          const mapped: Expense[] = allFetched.map((d: any) => {
             let status: ExpenseStatus = d.status || 'PENDING';
             let rejection_reason = d.rejection_reason || null;
             let type: ExpenseType = d.type || 'REGULAR';
